@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Enable to sync usage stats via iCloud Key-Value Store (needs a paid developer team).
+	     The identifier MUST match the iOS app's file for both to share one store.
+	     $(AppIdentifierPrefix) expands to your Team ID at sign time. -->
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>$(AppIdentifierPrefix)com.changeme.codexbarsync.kv</string>
+</dict>
+</plist>

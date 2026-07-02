@@ -1,0 +1,61 @@
+name: CodexBarRelay
+options:
+  bundleIdPrefix: com.changeme
+  deploymentTarget:
+    macOS: "14.0"
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    GENERATE_INFOPLIST_FILE: NO
+targets:
+  CodexBarSyncMac:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Shared
+      - path: Mac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.changeme.codexbarrelay.mac
+        PRODUCT_NAME: CodexBarRelay
+        INFOPLIST_KEY_LSMinimumSystemVersion: "14.0"
+        # Enable iCloud KV sync (paid team only). Uncomment when you have a paid account:
+        # CODE_SIGN_ENTITLEMENTS: Mac/CodexBarSyncMac.entitlements
+    info:
+      path: Mac/Info.plist
+      properties:
+        CFBundleName: CodexBarRelay
+        CFBundleDisplayName: CodexBar iOS Relay
+        LSMinimumSystemVersion: "14.0"
+        LSUIElement: false
+        NSLocalNetworkUsageDescription: "CodexBar iOS Relay shares AI usage stats with your iPhone on the local network."
+        NSBonjourServices:
+          - "_codexbarrelay._tcp"
+  CodexBarSynciOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Shared
+      - path: iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.changeme.codexbarrelay.ios
+        PRODUCT_NAME: CodexBarRelay
+        # Enable iCloud KV sync (paid team only). Uncomment when you have a paid account:
+        # CODE_SIGN_ENTITLEMENTS: iOS/CodexBarSynciOS.entitlements
+    info:
+      path: iOS/Info.plist
+      properties:
+        CFBundleName: CodexBarRelay
+        CFBundleDisplayName: CodexBar iOS Relay
+        UILaunchScreen:
+          UIColorName: ""
+        NSLocalNetworkUsageDescription: "CodexBar iOS Relay finds your Mac on the local network to show AI usage stats."
+        NSBonjourServices:
+          - "_codexbarrelay._tcp"
