@@ -4,11 +4,13 @@ public struct ProviderRow: View {
     public let entry: UsageEntry
     public let showUsed: Bool
     public let showAbsolute: Bool
+    public let hidePersonalInfo: Bool
 
-    public init(entry: UsageEntry, showUsed: Bool = false, showAbsolute: Bool = false) {
+    public init(entry: UsageEntry, showUsed: Bool = false, showAbsolute: Bool = false, hidePersonalInfo: Bool = false) {
         self.entry = entry
         self.showUsed = showUsed
         self.showAbsolute = showAbsolute
+        self.hidePersonalInfo = hidePersonalInfo
     }
 
     public var body: some View {
@@ -33,7 +35,7 @@ public struct ProviderRow: View {
         HStack(alignment: .firstTextBaseline) {
             Text(ProviderDisplayName.name(for: entry.provider))
                 .font(.headline)
-            if let acct = entry.usage?.accountEmail ?? entry.account {
+            if let acct = visibleAccount {
                 Text(acct)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -59,7 +61,11 @@ public struct ProviderRow: View {
         }
     }
 
-    @ViewBuilder
+    private var visibleAccount: String? {
+        guard !hidePersonalInfo else { return nil }
+        return entry.usage?.accountEmail ?? entry.account
+    }
+
     private func limitView(_ label: String, _ limit: Limit) -> some View {
         // showUsed=false -> remaining: bar depletes as you use, low remaining = red.
         // showUsed=true  -> used: bar fills as you use, high used = red.
@@ -116,7 +122,8 @@ public struct ProviderRow: View {
     @ViewBuilder
     private func resetCreditsView(_ credits: CodexResetCredits?) -> some View {
         if let credits, let n = credits.availableCount, n > 0 {
-            let credit = credits.credits?.first(where: { $0.status == "available" }) ?? credits.credits?.first
+            let availableCredits = (credits.credits ?? []).filter { $0.status == "available" }
+            let displayedCredits = availableCredits.isEmpty ? (credits.credits ?? []) : availableCredits
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.counterclockwise.circle").font(.caption2)
@@ -124,13 +131,17 @@ public struct ProviderRow: View {
                         .font(.caption.bold())
                 }
                 .foregroundStyle(.tint)
-                if let title = credit?.title, !title.isEmpty {
-                    Text(title).font(.caption2).foregroundStyle(.secondary)
-                }
-                if let iso = credit?.expiresAt, let d = ISO8601DateFormatter().date(from: iso) {
-                    Text("expires \(absoluteShort(iso)) · \(countdownTo(d))")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                ForEach(Array(displayedCredits.enumerated()), id: \.offset) { _, credit in
+                    if let title = credit.title, !title.isEmpty {
+                        Text(title)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let iso = credit.expiresAt, let d = ISO8601DateFormatter().date(from: iso) {
+                        Text("expires \(absoluteShort(iso)) · \(countdownTo(d))")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
             }
             .padding(.top, 2)
@@ -161,12 +172,14 @@ public struct UsageListView: View {
     public let searching: Bool
     public let statusText: String?
     public let sourceBadge: String?
+    public let hidePersonalInfo: Bool
 
-    public init(payload: Payload?, searching: Bool = false, statusText: String? = nil, sourceBadge: String? = nil) {
+    public init(payload: Payload?, searching: Bool = false, statusText: String? = nil, sourceBadge: String? = nil, hidePersonalInfo: Bool = false) {
         self.payload = payload
         self.searching = searching
         self.statusText = statusText
         self.sourceBadge = sourceBadge
+        self.hidePersonalInfo = hidePersonalInfo
     }
 
     public var body: some View {
@@ -176,13 +189,13 @@ public struct UsageListView: View {
                 let usable = payload.usage.filter { $0.hasUsage }
                 let errored = payload.usage.filter { !$0.hasUsage }
                 Section {
-                    ForEach(usable, id: \.self) { ProviderRow(entry: $0, showUsed: payload.showUsed, showAbsolute: payload.resetTimesShowAbsolute) }
+                    ForEach(usable, id: \.self) { ProviderRow(entry: $0, showUsed: payload.showUsed, showAbsolute: payload.resetTimesShowAbsolute, hidePersonalInfo: hidePersonalInfo) }
                 } header: {
                     Text("\(usable.count) providers")
                 }
                 if !errored.isEmpty {
                     Section {
-                        ForEach(errored, id: \.self) { ProviderRow(entry: $0, showUsed: payload.showUsed, showAbsolute: payload.resetTimesShowAbsolute) }
+                        ForEach(errored, id: \.self) { ProviderRow(entry: $0, showUsed: payload.showUsed, showAbsolute: payload.resetTimesShowAbsolute, hidePersonalInfo: hidePersonalInfo) }
                     } header: {
                         Text("\(errored.count) unavailable")
                     }
@@ -210,7 +223,7 @@ public struct UsageListView: View {
     private func headerSection(_ payload: Payload) -> some View {
         Section {
             VStack(alignment: .leading, spacing: 4) {
-                Text(payload.hostname)
+                Text(maskHostname(payload.hostname))
                     .font(.subheadline.bold())
                 HStack(spacing: 6) {
                     Image(systemName: "clock")
@@ -250,6 +263,10 @@ public struct UsageListView: View {
         if s < 3600 { return "synced \(Int(s/60))m ago" }
         return "synced \(Int(s/3600))h ago"
         #endif
+    }
+
+    private func maskHostname(_ value: String) -> String {
+        hidePersonalInfo ? "This Mac" : value
     }
 }
 

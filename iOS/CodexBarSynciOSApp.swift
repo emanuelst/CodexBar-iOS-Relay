@@ -19,6 +19,7 @@ struct ContentView: View {
     @EnvironmentObject var discovery: Discovery
     @EnvironmentObject var iCloud: ICloudDocumentStore
     @AppStorage("syncSource") private var syncSource: SyncSource = .auto
+    @AppStorage("hidePersonalInfo") private var hidePersonalInfo = false
     @State private var showSettings = false
 
     private var display: Payload? {
@@ -76,7 +77,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            UsageListView(payload: display, searching: searching, statusText: statusText, sourceBadge: activeSourceLabel)
+            UsageListView(payload: display, searching: searching, statusText: statusText, sourceBadge: activeSourceLabel, hidePersonalInfo: hidePersonalInfo)
                 .navigationTitle("CodexBar")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -125,6 +126,7 @@ private struct SettingsSheet: View {
     @Binding var syncSource: SyncSource
     @ObservedObject var iCloud: ICloudDocumentStore
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("hidePersonalInfo") private var hidePersonalInfo = false
     @State private var showPicker = false
 
     private var showsFileSection: Bool {
@@ -141,6 +143,13 @@ private struct SettingsSheet: View {
                 } footer: {
                     Text(footer)
                         .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Privacy") {
+                    Toggle("Hide personal information", isOn: $hidePersonalInfo)
+                    Text("Masks account emails and host name so screenshots are easier to share safely.")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
 

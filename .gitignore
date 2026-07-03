@@ -6,9 +6,8 @@ DerivedData/
 xcuserdata/
 *.xcworkspace/xcuserdata/
 
+# xcodegen — regenerated project; users run `xcodegen generate`
+CodexBarRelay.xcodeproj/
+
 # macOS
 .DS_Store
-
-# xcodegen-regenerated
-*.xcodeproj/project.xcworkspace/xcuserdata/
-*.xcodeproj/xcuserdata/

@@ -1,62 +1,41 @@
 # CodexBar iOS Relay
 
-Shows your [CodexBar](https://github.com/steipete/CodexBar) AI-usage stats on your iPhone,
-by running a tiny host app on your Mac that shares them over the **local network** (Bonjour)
-or via an iCloud Drive snapshot file.
+Shows your [CodexBar](https://github.com/steipete/CodexBar) usage on iPhone by running a small host app on your Mac.
 
-```
-codexbar (CLI)  ->  CodexBar iOS Relay (Mac)  ->  Bonjour / iCloud Drive  ->  CodexBar iOS Relay (iPhone)
-```
+Supports:
+- local LAN discovery via Bonjour
+- optional iCloud Drive snapshot sync
 
-The Mac app shells out to `codexbar usage --format json` every 60s, wraps the
-result with a `syncedAt` timestamp and your hostname, and serves it on an auto-chosen port
-advertised as `_codexbarrelay._tcp`. The iPhone app browses Bonjour, fetches `/usage`, and
-renders per-provider primary/secondary/tertiary usage bars plus reset details.
+## Status
+- Experimental and not fully tested.
+- Use at your own risk.
+- Tailscale / remote access is unverified.
+- If you run more than one host on the same LAN, the iPhone currently adopts the first Bonjour result it sees.
 
 ## Requirements
-- `codexbar` on your PATH (the Mac app calls `/opt/homebrew/bin/codexbar` — edit
-  `Mac/UsagePoller.swift` if yours lives elsewhere).
-- Mac and iPhone on the **same Wi-Fi/LAN** for Bonjour mode.
-- Xcode 26 (project generated with XcodeGen).
+- `codexbar` installed on the Mac
+- Xcode 26
+- Mac and iPhone on the same Wi‑Fi for LAN mode
 
-## Open & run
+## Run
 ```sh
-xcodegen generate          # regenerate CodexBarRelay.xcodeproj from project.yml
+xcodegen generate
 open CodexBarRelay.xcodeproj
 ```
 
 In Xcode:
-1. Pick your **personal team** for both targets in Signing & Capabilities.
-2. Update the bundle IDs in `project.yml` from `com.changeme.*` to your own, then `xcodegen generate` again if needed.
-3. **Mac:** select the *CodexBarSyncMac* scheme → run. A menu-bar gauge icon appears (and a small
-   status window). It starts serving immediately, even with the window closed.
-4. **iPhone:** select the *CodexBarSynciOS* scheme → your iPhone → run. Approve the local-network
-   prompt. It finds the Mac within a second or two and shows the stats. Pull down to refresh.
+1. Change `com.changeme.*` bundle IDs in `project.yml`.
+2. Set your signing team in Xcode before building to your devices.
+3. Run `CodexBarSyncMac` on your Mac.
+4. Run `CodexBarSynciOS` on your iPhone.
 
-## Files
-- `project.yml` — XcodeGen project definition (two app targets, shared sources).
-- `Shared/` — `Models.swift` (Codable for the codexbar JSON), `UsageListView.swift` (shared UI).
-- `Mac/` — `CodexBarSyncMacApp.swift` (menu bar + window), `SyncController.swift` (owns poller +
-  server, starts on init so it runs with no window), `UsagePoller.swift` (runs the CLI),
-  `LanServer.swift` (NWListener HTTP server + Bonjour).
-- `iOS/` — `CodexBarSynciOSApp.swift`, `ContentView.swift`, `Discovery.swift` (NWBrowser),
-  `LanHttpClient.swift` (raw TCP GET over Network.framework).
+For iPhone installs, you need to pick your own Development Team for the iOS target.
 
-## Notes / shortcuts
-- `codexbar` exits non-zero when some providers fail but still emits valid JSON for the rest;
-  the poller trusts stdout, not the exit code.
-- `error.code` in the codexbar JSON is sometimes an int, sometimes a string — `FlexStr` handles both.
-- Refresh interval is 60s on the Mac, 15s on the iPhone (read-only pulls). Edit in
-  `UsagePoller.swift` / `Discovery.swift`.
-- iCloud Drive sync works without a paid Apple Developer account because the user explicitly picks the file.
-- Proper CloudKit sync is not implemented yet.
+## Screenshots
+Turn on **Hide personal information** before taking screenshots. It hides account emails and the host name.
 
-## Debug
-```sh
-# what the Mac is serving:
-dns-sd -B _codexbarrelay._tcp .                         # find the instance
-dns-sd -L "<HostName>" _codexbarrelay._tcp local.       # resolve host:port
-curl http://<host>.local:<port>/usage | python3 -m json.tool
-curl http://<host>.local:<port>/health
-```
-The Mac app logs poller status to stderr (`[codexbarsync] poll ok: N entries …`).
+### iPhone
+![iPhone screenshot](./screenshot-ios.png)
+
+### macOS
+![macOS screenshot](./screenshot-macos.png)

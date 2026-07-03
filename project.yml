@@ -18,11 +18,16 @@ targets:
     deploymentTarget: "14.0"
     sources:
       - path: Shared
+        excludes:
+          - Assets.xcassets
       - path: Mac
+    resources:
+      - path: Mac/Assets.xcassets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.changeme.codexbarrelay.mac
         PRODUCT_NAME: CodexBarRelay
+        ASSETCATALOG_COMPILER_APPICON_NAME: MacAppIcon
         INFOPLIST_KEY_LSMinimumSystemVersion: "14.0"
         # Enable iCloud KV sync (paid team only). Uncomment when you have a paid account:
         # CODE_SIGN_ENTITLEMENTS: Mac/CodexBarSyncMac.entitlements
@@ -30,7 +35,7 @@ targets:
       path: Mac/Info.plist
       properties:
         CFBundleName: CodexBarRelay
-        CFBundleDisplayName: CodexBar iOS Relay
+        CFBundleDisplayName: CodexBar Relay
         LSMinimumSystemVersion: "14.0"
         LSUIElement: false
         NSLocalNetworkUsageDescription: "CodexBar iOS Relay shares AI usage stats with your iPhone on the local network."
@@ -42,18 +47,23 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: Shared
+        excludes:
+          - Assets.xcassets
       - path: iOS
+    resources:
+      - path: iOS/Assets.xcassets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.changeme.codexbarrelay.ios
         PRODUCT_NAME: CodexBarRelay
+        TARGETED_DEVICE_FAMILY: "1"
         # Enable iCloud KV sync (paid team only). Uncomment when you have a paid account:
         # CODE_SIGN_ENTITLEMENTS: iOS/CodexBarSynciOS.entitlements
     info:
       path: iOS/Info.plist
       properties:
         CFBundleName: CodexBarRelay
-        CFBundleDisplayName: CodexBar iOS Relay
+        CFBundleDisplayName: CodexBar Relay
         UILaunchScreen:
           UIColorName: ""
         NSLocalNetworkUsageDescription: "CodexBar iOS Relay finds your Mac on the local network to show AI usage stats."
