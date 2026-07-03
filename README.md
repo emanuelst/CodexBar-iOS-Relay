@@ -25,6 +25,7 @@ open CodexBarRelay.xcodeproj
 
 In Xcode:
 1. Change `com.changeme.*` bundle IDs in `project.yml`.
+   If you later enable the optional iCloud entitlements, also replace the matching `com.changeme...` IDs in `Mac/CodexBarSyncMac.entitlements` and `iOS/CodexBarSynciOS.entitlements`.
 2. Set your signing team in Xcode before building to your devices.
 3. Run `CodexBarSyncMac` on your Mac.
 4. Run `CodexBarSynciOS` on your iPhone.
