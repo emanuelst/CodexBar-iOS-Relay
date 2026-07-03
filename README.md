@@ -35,7 +35,7 @@ For iPhone installs, you need to pick your own Development Team for the iOS targ
 Turn on **Hide personal information** before taking screenshots. It hides account emails and the host name.
 
 ### iPhone
-![iPhone screenshot](./screenshot-ios.png)
+<img src="./screenshot-ios.png" width="300" alt="iPhone screenshot" />
 
 ### macOS
-![macOS screenshot](./screenshot-macos.png)
+<img src="./screenshot-macos.png" width="480" alt="macOS screenshot" />
