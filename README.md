@@ -36,7 +36,7 @@ Turn on **Hide personal information** before taking screenshots. It hides accoun
 
 <table>
   <tr>
-    <td align="center"><img src="./screenshot-ios.png" width="366" alt="iPhone screenshot" /><br/><sub>iPhone</sub></td>
-    <td align="center"><img src="./screenshot-macos.png" width="480" alt="macOS screenshot" /><br/><sub>macOS</sub></td>
+    <td align="center"><img src="./screenshot-ios.png" height="600" alt="iPhone screenshot" /><br/><sub>iPhone</sub></td>
+    <td align="center"><img src="./screenshot-macos.png" height="600" alt="macOS screenshot" /><br/><sub>macOS</sub></td>
   </tr>
 </table>
