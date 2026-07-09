@@ -45,7 +45,7 @@ struct CodexBarSyncMacApp: App {
     }
 }
 
-/// Sets the hosting NSWindow to floating + all-spaces while `floating` is true.
+/// Sets the hosting NSWindow to floating while `floating` is true.
 /// ponytail: NSViewRepresentable to grab the window — no WindowGroup window-level API on macOS 14.
 private struct WindowFloatAccessor: NSViewRepresentable {
     @Binding var floating: Bool
@@ -59,7 +59,7 @@ private struct WindowFloatAccessor: NSViewRepresentable {
         guard let w = v.window else { return }
         if floating {
             w.level = .floating
-            w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            w.collectionBehavior = []
             w.isMovableByWindowBackground = true
         } else {
             w.level = .normal

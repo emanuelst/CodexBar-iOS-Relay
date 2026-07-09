@@ -36,13 +36,14 @@ final class UsagePoller: ObservableObject {
 
     func poll() async {
         do {
-            let raw = try await runCodexbar()
-            guard let entries = UsageJson.decode(raw) else {
+            let raw = try await runCodexbar(arguments: ["usage", "--format", "json"])
+            guard var entries = UsageJson.decode(raw) else {
                 self.lastError = "decode failed (\(raw.count) bytes)"
                 logErr("decode failed; first 200B: \(String(data: raw.prefix(200), encoding: .utf8) ?? "")")
                 self.onUpdate?()
                 return
             }
+            entries = await replacingCodexWithCLIUsage(in: entries)
             let now = ISO8601DateFormatter().string(from: Date())
             let p = Payload(
                 syncedAt: now,
@@ -85,12 +86,58 @@ final class UsagePoller: ObservableObject {
         return (d[key] as? Bool) ?? def
     }
 
-    private func runCodexbar() async throws -> Data {
+    private func replacingCodexWithCLIUsage(in entries: [UsageEntry]) async -> [UsageEntry] {
+        do {
+            let raw = try await runCodexbar(arguments: ["usage", "--provider", "codex", "--source", "cli", "--format", "json"])
+            guard let cliEntries = UsageJson.decode(raw),
+                  let cliCodex = cliEntries.first(where: { $0.provider == "codex" && $0.usage != nil })
+            else {
+                logErr("codex cli replacement skipped: decode failed")
+                return entries
+            }
+
+            let defaultCodex = entries.first { $0.provider == "codex" && $0.usage != nil }
+            let mergedCodex = codexEntryWithResetCredits(from: cliCodex, fallback: defaultCodex)
+            var result = entries.filter { $0.provider != "codex" }
+            result.insert(mergedCodex, at: 0)
+            logErr("codex cli replacement ok")
+            return result
+        } catch {
+            logErr("codex cli replacement skipped: \(error)")
+            return entries
+        }
+    }
+
+    private func codexEntryWithResetCredits(from cliCodex: UsageEntry, fallback defaultCodex: UsageEntry?) -> UsageEntry {
+        guard let cliUsage = cliCodex.usage,
+              cliUsage.codexResetCredits == nil,
+              let credits = defaultCodex?.usage?.codexResetCredits
+        else { return cliCodex }
+
+        let mergedUsage = Usage(
+            accountEmail: cliUsage.accountEmail,
+            updatedAt: cliUsage.updatedAt,
+            loginMethod: cliUsage.loginMethod,
+            primary: cliUsage.primary,
+            secondary: cliUsage.secondary,
+            tertiary: cliUsage.tertiary,
+            codexResetCredits: credits
+        )
+        return UsageEntry(
+            provider: cliCodex.provider,
+            source: cliCodex.source,
+            account: cliCodex.account,
+            usage: mergedUsage,
+            error: cliCodex.error
+        )
+    }
+
+    private func runCodexbar(arguments: [String]) async throws -> Data {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
             DispatchQueue.global(qos: .utility).async {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/codexbar")
-                p.arguments = ["usage", "--format", "json"]  // no --provider all: default honors CodexBar's in-app provider toggles
+                p.arguments = arguments
                 let out = Pipe()
                 let err = Pipe()
                 p.standardOutput = out

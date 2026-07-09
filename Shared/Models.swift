@@ -10,6 +10,14 @@ public struct UsageEntry: Codable, Hashable {
     public let usage: Usage?
     public let error: ApiError?
 
+    public init(provider: String, source: String?, account: String?, usage: Usage?, error: ApiError?) {
+        self.provider = provider
+        self.source = source
+        self.account = account
+        self.usage = usage
+        self.error = error
+    }
+
     public var hasUsage: Bool { usage != nil }
 }
 
@@ -21,6 +29,16 @@ public struct Usage: Codable, Hashable {
     public let secondary: Limit?
     public let tertiary: Limit?
     public let codexResetCredits: CodexResetCredits?
+
+    public init(accountEmail: String?, updatedAt: String?, loginMethod: String?, primary: Limit?, secondary: Limit?, tertiary: Limit?, codexResetCredits: CodexResetCredits?) {
+        self.accountEmail = accountEmail
+        self.updatedAt = updatedAt
+        self.loginMethod = loginMethod
+        self.primary = primary
+        self.secondary = secondary
+        self.tertiary = tertiary
+        self.codexResetCredits = codexResetCredits
+    }
 }
 
 /// Codex rate-limit reset credits (codex provider only). Lives under `usage`.
