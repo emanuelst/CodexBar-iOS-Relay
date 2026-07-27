@@ -4,13 +4,30 @@ import SwiftUI
 struct CodexBarSynciOSApp: App {
     @StateObject private var discovery = Discovery()
     @StateObject private var iCloud = ICloudDocumentStore()
+    @AppStorage("syncSource") private var syncSource: SyncSource = .icloudDrive
+
+    init() {
+        // iCloud Drive is the reliable default. Preserve the user's later choice
+        // after this one-time migration from the old automatic default.
+        let defaults = UserDefaults.standard
+        let migrationKey = "syncSourceDefaultVersion"
+        if defaults.string(forKey: migrationKey) != "icloud-drive-v1" {
+            defaults.set(SyncSource.icloudDrive.rawValue, forKey: "syncSource")
+            defaults.set("icloud-drive-v1", forKey: migrationKey)
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(discovery)
                 .environmentObject(iCloud)
-                .task { discovery.start() }
+                .task {
+                    if syncSource != .icloudDrive { discovery.start() }
+                }
+                .onChange(of: syncSource) { _, source in
+                    if source != .icloudDrive { discovery.start() }
+                }
         }
     }
 }
@@ -18,7 +35,7 @@ struct CodexBarSynciOSApp: App {
 struct ContentView: View {
     @EnvironmentObject var discovery: Discovery
     @EnvironmentObject var iCloud: ICloudDocumentStore
-    @AppStorage("syncSource") private var syncSource: SyncSource = .auto
+    @AppStorage("syncSource") private var syncSource: SyncSource = .icloudDrive
     @AppStorage("hidePersonalInfo") private var hidePersonalInfo = false
     @State private var showSettings = false
 

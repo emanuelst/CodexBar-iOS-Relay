@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -14,6 +15,8 @@ final class ICloudDocumentStore: ObservableObject {
     @Published private(set) var isDownloading = false
 
     private let bookmarkKey = "ios.iCloudDoc.bookmark"
+    private let keychainService = "com.changeme.codexbarrelay.ios"
+    private let keychainAccount = "iCloudDocumentBookmark"
     private var fileURL: URL?
 
     init() {
@@ -31,7 +34,16 @@ final class ICloudDocumentStore: ObservableObject {
     func refresh() {
         guard let url = fileURL else { return }
         let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard scoped else {
+            lastError = "iCloud file access expired or is unavailable. Pick the file again in Settings."
+            return
+        }
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            lastError = "The selected iCloud file is missing or was moved. Pick it again in Settings."
+            return
+        }
 
         // Trigger iCloud download if the file isn't local yet (tiny JSON → near-instant
         // once iCloud has it, but the first read after a change can race the download).
@@ -76,27 +88,61 @@ final class ICloudDocumentStore: ObservableObject {
         payload = nil
         snapshotDate = nil
         UserDefaults.standard.removeObject(forKey: bookmarkKey)
+        deleteKeychainBookmark()
     }
 
     private func saveBookmark(for url: URL) {
         do {
-            // .minimalBookmark is the documented option for UIDocumentPicker URLs.
             let data = try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
-            UserDefaults.standard.set(data, forKey: bookmarkKey)
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: keychainService,
+                kSecAttrAccount as String: keychainAccount,
+            ]
+            SecItemDelete(query as CFDictionary)
+            var item = query
+            item[kSecValueData as String] = data
+            let status = SecItemAdd(item as CFDictionary, nil)
+            guard status == errSecSuccess else {
+                lastError = "bookmark: keychain error \(status)"
+                return
+            }
+            UserDefaults.standard.removeObject(forKey: bookmarkKey)
         } catch {
             lastError = "bookmark: \(error)"
         }
     }
 
     private func loadBookmark() {
-        guard let data = UserDefaults.standard.data(forKey: bookmarkKey) else { return }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var keychainResult: CFTypeRef?
+        let keychainStatus = SecItemCopyMatching(query as CFDictionary, &keychainResult)
+        let hasKeychainBookmark = keychainStatus == errSecSuccess
+        let data = (hasKeychainBookmark ? keychainResult as? Data : nil)
+            ?? UserDefaults.standard.data(forKey: bookmarkKey)
+        guard let data else { return }
         var stale = false
         do {
             let url = try URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
             fileURL = url
-            if stale { saveBookmark(for: url) }
+            if stale || !hasKeychainBookmark { saveBookmark(for: url) }
         } catch {
             lastError = "bookmark: \(error)"
         }
     }
+    private func deleteKeychainBookmark() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
 }

@@ -29,7 +29,22 @@ final class Discovery: ObservableObject {
         }
         b.stateUpdateHandler = { [weak self] st in
             Task { @MainActor [weak self] in
-                if case .failed = st { self?.isSearching = true }
+                guard let self else { return }
+                switch st {
+                case .ready, .setup:
+                    self.lastError = nil
+                    self.isSearching = true
+                case .waiting(let error):
+                    self.lastError = "Local network access is unavailable: \(error.localizedDescription)"
+                    self.isSearching = false
+                case .failed(let error):
+                    self.lastError = "Mac discovery failed: \(error.localizedDescription)"
+                    self.isSearching = false
+                case .cancelled:
+                    self.isSearching = false
+                @unknown default:
+                    self.isSearching = true
+                }
             }
         }
         b.start(queue: .main)
