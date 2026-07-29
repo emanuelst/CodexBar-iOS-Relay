@@ -1,9 +1,9 @@
 import Foundation
 import Network
 
-/// Minimal dependency-free HTTP server on 0.0.0.0 (auto port), Bonjour-advertised
-/// as `_codexbarrelay._tcp`. Serves `/usage` and `/health`. One client at a time
-/// is plenty (the phone). ponytail: no streaming, no keep-alive, closes after each reply.
+/// Minimal dependency-free HTTP server on a stable port, Bonjour-advertised as
+/// `_codexbarrelay._tcp`. The stable port also allows direct connections over
+/// Tailscale, where Bonjour service discovery is not available.
 final class LanServer {
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "codexbarsync.lan", qos: .utility)
@@ -14,7 +14,13 @@ final class LanServer {
         stop()
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
-        let listener = try NWListener(using: params, on: .any)
+        guard let relayPort = NWEndpoint.Port(rawValue: RelayNetwork.defaultPort) else {
+            throw NSError(
+                domain: "CodexBarRelay",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "invalid relay port"])
+        }
+        let listener = try NWListener(using: params, on: relayPort)
         listener.service = NWListener.Service(
             name: Host.current().localizedName ?? "CodexBarRelay",
             type: "_codexbarrelay._tcp"
@@ -22,9 +28,14 @@ final class LanServer {
         listener.newConnectionHandler = { [weak self] conn in
             self?.handle(conn)
         }
-        listener.stateUpdateHandler = { [weak self] st in
-            if case .ready = st, let p = listener.port {
-                self?.port = UInt16(p.rawValue)
+        listener.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                self?.port = RelayNetwork.defaultPort
+            case .failed:
+                self?.port = 0
+            default:
+                break
             }
         }
         listener.start(queue: queue)
