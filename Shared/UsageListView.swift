@@ -21,6 +21,7 @@ public struct ProviderRow: View {
                 if let s = usage.secondary { limitView("Secondary", s); paceLine(for: s) }
                 if let t = usage.tertiary { limitView("Tertiary", t); paceLine(for: t) }
                 resetCreditsView(usage.codexResetCredits)
+                subscriptionMetadataView(usage)
                 footer(usage)
             } else if let err = entry.error {
                 Text(err.message ?? err.kind ?? "no data")
@@ -148,6 +149,25 @@ public struct ProviderRow: View {
         }
     }
 
+    @ViewBuilder
+    private func subscriptionMetadataView(_ usage: Usage) -> some View {
+        if let iso = usage.subscriptionRenewsAt {
+            planDateLine("plan renews", iso)
+        }
+        if let iso = usage.subscriptionExpiresAt {
+            planDateLine("plan expires", iso)
+        }
+    }
+
+    @ViewBuilder
+    private func planDateLine(_ label: String, _ iso: String) -> some View {
+        if let date = ISO8601DateFormatter().date(from: iso) {
+            Text("\(label) \(absoluteShort(iso)) · \(countdownTo(date))")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tint)
+        }
+    }
+
     private func countdownTo(_ date: Date) -> String {
         let s = max(0, date.timeIntervalSince(.now))
         let m = max(1, Int(ceil(s / 60.0)))
@@ -183,9 +203,10 @@ public struct UsageListView: View {
     }
 
     public var body: some View {
-        List {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            List {
             if let payload {
-                headerSection(payload)
+                headerSection(payload, now: context.date)
                 let usable = payload.usage.filter { $0.hasUsage }
                 let errored = payload.usage.filter { !$0.hasUsage }
                 Section {
@@ -216,20 +237,24 @@ public struct UsageListView: View {
         }
         #if os(iOS)
         .listStyle(.insetGrouped)
-        #endif
+            #endif
+        }
     }
 
     @ViewBuilder
-    private func headerSection(_ payload: Payload) -> some View {
+    private func headerSection(_ payload: Payload, now: Date) -> some View {
         Section {
             VStack(alignment: .leading, spacing: 4) {
                 Text(maskHostname(payload.hostname))
                     .font(.subheadline.bold())
                 HStack(spacing: 6) {
-                    Image(systemName: "clock")
+                    Image(systemName: syncIcon(for: payload.syncedAt, now: now))
                         .font(.caption2)
-                    Text(syncedAgo(payload.syncedAt))
+                    Text(syncedAgo(payload.syncedAt, now: now))
                         .font(.caption.monospacedDigit())
+                }
+                .foregroundStyle(syncColor(for: payload.syncedAt, now: now))
+                HStack(spacing: 6) {
                     Spacer()
                     if let badge = sourceBadge {
                         Text(badge)
@@ -247,22 +272,26 @@ public struct UsageListView: View {
         }
     }
 
-    private func syncedAgo(_ iso: String) -> String {
-        guard let d = ISO8601DateFormatter().date(from: iso) else { return iso }
-        #if os(iOS)
-        // ponytail: absolute timestamp on iOS — relative "8s ago" hides staleness;
-        // a clock time makes a stale snapshot obvious at a glance.
-        let f = DateFormatter()
-        f.dateStyle = .short
-        f.timeStyle = .medium
-        return "synced " + f.string(from: d)
-        #else
-        let s = Date().timeIntervalSince(d)
-        if s < 5 { return "synced just now" }
-        if s < 60 { return "synced \(Int(s))s ago" }
-        if s < 3600 { return "synced \(Int(s/60))m ago" }
-        return "synced \(Int(s/3600))h ago"
-        #endif
+    private func syncedAgo(_ iso: String, now: Date) -> String {
+        SyncFreshness.label(from: iso, now: now)
+    }
+
+    private func syncIcon(for iso: String, now: Date) -> String {
+        switch SyncFreshness.level(from: iso, now: now) {
+        case .stale: return "exclamationmark.triangle.fill"
+        case .aging: return "clock.badge.exclamationmark"
+        case .fresh: return "clock"
+        case .unknown: return "questionmark.circle"
+        }
+    }
+
+    private func syncColor(for iso: String, now: Date) -> Color {
+        switch SyncFreshness.level(from: iso, now: now) {
+        case .stale: return .red
+        case .aging: return .orange
+        case .fresh: return .secondary
+        case .unknown: return .secondary
+        }
     }
 
     private func maskHostname(_ value: String) -> String {

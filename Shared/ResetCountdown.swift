@@ -51,3 +51,39 @@ public enum ResetCountdown {
         return nil
     }
 }
+
+
+/// Shared freshness policy for snapshots written by the Mac host.
+public enum SyncFreshness {
+    public enum Level: Equatable {
+        case fresh
+        case aging
+        case stale
+        case unknown
+    }
+
+    public static let warningAfter: TimeInterval = 5 * 60
+    public static let staleAfter: TimeInterval = 15 * 60
+
+    public static func age(from iso: String, now: Date = .now) -> TimeInterval? {
+        guard let date = ISO8601DateFormatter().date(from: iso) else { return nil }
+        return max(0, now.timeIntervalSince(date))
+    }
+
+    public static func level(from iso: String, now: Date = .now) -> Level {
+        guard let age = age(from: iso, now: now) else { return .unknown }
+        if age >= staleAfter { return .stale }
+        if age >= warningAfter { return .aging }
+        return .fresh
+    }
+
+    public static func label(from iso: String, now: Date = .now) -> String {
+        guard let age = age(from: iso, now: now) else { return "last sync unknown" }
+        let prefix = age >= staleAfter ? "last synced" : "synced"
+        if age < 5 { return "\(prefix) just now" }
+        if age < 60 { return "\(prefix) \(Int(age))s ago" }
+        if age < 3600 { return "\(prefix) \(Int(age / 60))m ago" }
+        if age < 86400 { return "\(prefix) \(Int(age / 3600))h ago" }
+        return "\(prefix) \(Int(age / 86400))d ago"
+    }
+}

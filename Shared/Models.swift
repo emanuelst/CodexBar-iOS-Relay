@@ -29,8 +29,11 @@ public struct Usage: Codable, Hashable {
     public let secondary: Limit?
     public let tertiary: Limit?
     public let codexResetCredits: CodexResetCredits?
+    /// Optional provider-supplied subscription metadata. CodexBar may omit these.
+    public let subscriptionRenewsAt: String?
+    public let subscriptionExpiresAt: String?
 
-    public init(accountEmail: String?, updatedAt: String?, loginMethod: String?, primary: Limit?, secondary: Limit?, tertiary: Limit?, codexResetCredits: CodexResetCredits?) {
+    public init(accountEmail: String?, updatedAt: String?, loginMethod: String?, primary: Limit?, secondary: Limit?, tertiary: Limit?, codexResetCredits: CodexResetCredits?, subscriptionRenewsAt: String? = nil, subscriptionExpiresAt: String? = nil) {
         self.accountEmail = accountEmail
         self.updatedAt = updatedAt
         self.loginMethod = loginMethod
@@ -38,6 +41,8 @@ public struct Usage: Codable, Hashable {
         self.secondary = secondary
         self.tertiary = tertiary
         self.codexResetCredits = codexResetCredits
+        self.subscriptionRenewsAt = subscriptionRenewsAt
+        self.subscriptionExpiresAt = subscriptionExpiresAt
     }
 }
 

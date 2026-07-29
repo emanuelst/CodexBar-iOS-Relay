@@ -18,6 +18,15 @@ final class UsagePoller: ObservableObject {
 
     let interval: TimeInterval
     private var timer: Timer?
+    private struct CodexSubscriptionMetadata {
+        let renewsAt: String?
+        let expiresAt: String?
+    }
+
+    private var cachedCodexSubscriptionMetadata: CodexSubscriptionMetadata?
+    private var nextCodexWebMetadataRefreshAt = Date.distantPast
+    private static let webMetadataRefreshInterval: TimeInterval = 6 * 60 * 60
+    private static let webMetadataRetryInterval: TimeInterval = 15 * 60
 
     init(interval: TimeInterval = 60) {
         self.interval = interval
@@ -97,7 +106,8 @@ final class UsagePoller: ObservableObject {
             }
 
             let defaultCodex = entries.first { $0.provider == "codex" && $0.usage != nil }
-            let mergedCodex = codexEntryWithResetCredits(from: cliCodex, fallback: defaultCodex)
+            let webMetadata = await codexWebSubscriptionMetadata()
+            let mergedCodex = codexEntryWithMetadata(from: cliCodex, fallback: defaultCodex, webMetadata: webMetadata)
             var result = entries.filter { $0.provider != "codex" }
             result.insert(mergedCodex, at: 0)
             logErr("codex cli replacement ok")
@@ -108,10 +118,19 @@ final class UsagePoller: ObservableObject {
         }
     }
 
-    private func codexEntryWithResetCredits(from cliCodex: UsageEntry, fallback defaultCodex: UsageEntry?) -> UsageEntry {
-        guard let cliUsage = cliCodex.usage,
-              cliUsage.codexResetCredits == nil,
-              let credits = defaultCodex?.usage?.codexResetCredits
+    private func codexEntryWithMetadata(
+        from cliCodex: UsageEntry,
+        fallback defaultCodex: UsageEntry?,
+        webMetadata: CodexSubscriptionMetadata?) -> UsageEntry
+    {
+        guard let cliUsage = cliCodex.usage else { return cliCodex }
+        let fallbackUsage = defaultCodex?.usage
+        let credits = cliUsage.codexResetCredits ?? fallbackUsage?.codexResetCredits
+        let renewsAt = cliUsage.subscriptionRenewsAt ?? fallbackUsage?.subscriptionRenewsAt ?? webMetadata?.renewsAt
+        let expiresAt = cliUsage.subscriptionExpiresAt ?? fallbackUsage?.subscriptionExpiresAt ?? webMetadata?.expiresAt
+        guard credits != cliUsage.codexResetCredits
+            || renewsAt != cliUsage.subscriptionRenewsAt
+            || expiresAt != cliUsage.subscriptionExpiresAt
         else { return cliCodex }
 
         let mergedUsage = Usage(
@@ -121,7 +140,9 @@ final class UsagePoller: ObservableObject {
             primary: cliUsage.primary,
             secondary: cliUsage.secondary,
             tertiary: cliUsage.tertiary,
-            codexResetCredits: credits
+            codexResetCredits: credits,
+            subscriptionRenewsAt: renewsAt,
+            subscriptionExpiresAt: expiresAt
         )
         return UsageEntry(
             provider: cliCodex.provider,
@@ -130,6 +151,46 @@ final class UsagePoller: ObservableObject {
             usage: mergedUsage,
             error: cliCodex.error
         )
+    }
+
+    private func codexWebSubscriptionMetadata(now: Date = .now) async -> CodexSubscriptionMetadata? {
+        if now < nextCodexWebMetadataRefreshAt {
+            return cachedCodexSubscriptionMetadata
+        }
+
+        nextCodexWebMetadataRefreshAt = now.addingTimeInterval(Self.webMetadataRetryInterval)
+        do {
+            let raw = try await runCodexbar(arguments: [
+                "usage",
+                "--provider", "codex",
+                "--source", "web",
+                "--format", "json",
+                "--web-timeout", "60",
+            ])
+            guard let entries = UsageJson.decode(raw),
+                  let usage = entries.first(where: { $0.provider == "codex" })?.usage
+            else {
+                logErr("codex web metadata skipped: decode failed")
+                return cachedCodexSubscriptionMetadata
+            }
+
+            let metadata = CodexSubscriptionMetadata(
+                renewsAt: usage.subscriptionRenewsAt,
+                expiresAt: usage.subscriptionExpiresAt
+            )
+            guard metadata.renewsAt != nil || metadata.expiresAt != nil else {
+                logErr("codex web metadata skipped: subscription date missing")
+                return cachedCodexSubscriptionMetadata
+            }
+
+            cachedCodexSubscriptionMetadata = metadata
+            nextCodexWebMetadataRefreshAt = now.addingTimeInterval(Self.webMetadataRefreshInterval)
+            logErr("codex web metadata ok")
+            return metadata
+        } catch {
+            logErr("codex web metadata skipped: \(error)")
+            return cachedCodexSubscriptionMetadata
+        }
     }
 
     private func runCodexbar(arguments: [String]) async throws -> Data {

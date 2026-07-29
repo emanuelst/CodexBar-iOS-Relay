@@ -105,13 +105,30 @@ private struct MacRootView: View {
     }
 
     private var statusBar: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            statusBarContent(now: context.date)
+        }
+    }
+
+    private func syncColor(_ freshness: SyncFreshness.Level) -> Color {
+        switch freshness {
+        case .stale: return .red
+        case .aging: return .orange
+        case .fresh: return .green
+        case .unknown: return .secondary
+        }
+    }
+
+    private func statusBarContent(now: Date) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Circle().fill(sync.lastError == nil ? Color.green : Color.orange).frame(width: 8, height: 8)
+                let freshness = sync.syncedAt.map { SyncFreshness.level(from: ISO8601DateFormatter().string(from: $0), now: now) } ?? .unknown
+                Circle().fill(sync.lastError == nil ? syncColor(freshness) : Color.orange).frame(width: 8, height: 8)
                 if let d = sync.syncedAt {
-                    Text("synced \(RelativeDateTimeFormatter().localizedString(for: d, relativeTo: Date()))")
+                    let iso = ISO8601DateFormatter().string(from: d)
+                    Text(SyncFreshness.label(from: iso, now: now))
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(sync.lastError == nil ? syncColor(freshness) : .orange)
                 } else {
                     Text(sync.lastError ?? "running…").font(.caption).foregroundStyle(.secondary)
                 }
@@ -201,10 +218,13 @@ private struct MenuBarContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let d = sync.syncedAt {
-                Text("Last sync: \(RelativeDateTimeFormatter().localizedString(for: d, relativeTo: Date()))")
-            } else {
-                Text("No sync yet")
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                if let d = sync.syncedAt {
+                    let iso = ISO8601DateFormatter().string(from: d)
+                    Text("Last sync: \(SyncFreshness.label(from: iso, now: context.date))")
+                } else {
+                    Text("No sync yet")
+                }
             }
             if sync.serverOK {
                 Text("Serving on :\(sync.serverPort)").font(.caption).foregroundStyle(.secondary)

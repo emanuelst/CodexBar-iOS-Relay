@@ -78,6 +78,8 @@ final class ICloudDocumentStore: ObservableObject {
 
     /// Persist a freshly-picked URL (called while the picker's security scope is still live).
     func setPickedURL(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         saveBookmark(for: url)
         fileURL = url
         refresh()
@@ -93,7 +95,14 @@ final class ICloudDocumentStore: ObservableObject {
 
     private func saveBookmark(for url: URL) {
         do {
-            let data = try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+            #if os(macOS)
+            let bookmarkOptions: URL.BookmarkCreationOptions = [.minimalBookmark, .withSecurityScope]
+            #else
+            // iOS does not expose .withSecurityScope; the document picker grants
+            // access to the picked URL and the bookmark preserves that selection.
+            let bookmarkOptions: URL.BookmarkCreationOptions = [.minimalBookmark]
+            #endif
+            let data = try url.bookmarkData(options: bookmarkOptions, includingResourceValuesForKeys: nil, relativeTo: nil)
             let query: [String: Any] = [
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: keychainService,
@@ -101,6 +110,7 @@ final class ICloudDocumentStore: ObservableObject {
             ]
             SecItemDelete(query as CFDictionary)
             var item = query
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
             item[kSecValueData as String] = data
             let status = SecItemAdd(item as CFDictionary, nil)
             guard status == errSecSuccess else {
@@ -129,9 +139,23 @@ final class ICloudDocumentStore: ObservableObject {
         guard let data else { return }
         var stale = false
         do {
-            let url = try URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
+            let url: URL
+            #if os(macOS)
+            do {
+                url = try URL(resolvingBookmarkData: data, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale)
+            } catch {
+                // Accept the pre-fix minimal bookmark once.
+                url = try URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
+            }
+            #else
+            url = try URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
+            #endif
             fileURL = url
-            if stale || !hasKeychainBookmark { saveBookmark(for: url) }
+            if stale || !hasKeychainBookmark {
+                let scoped = url.startAccessingSecurityScopedResource()
+                saveBookmark(for: url)
+                if scoped { url.stopAccessingSecurityScopedResource() }
+            }
         } catch {
             lastError = "bookmark: \(error)"
         }
