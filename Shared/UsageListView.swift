@@ -162,7 +162,7 @@ public struct ProviderRow: View {
     @ViewBuilder
     private func planDateLine(_ label: String, _ iso: String) -> some View {
         if let date = ISO8601DateFormatter().date(from: iso) {
-            Text("\(label) \(absoluteShort(iso)) · \(countdownTo(date))")
+            Text("\(label) \(subscriptionDateOnly(date))")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.tint)
         }
@@ -176,6 +176,13 @@ public struct ProviderRow: View {
         if d > 0 { return h > 0 ? "in \(d)d \(h)h" : "in \(d)d" }
         if h > 0 { let mn = m % 60; return mn > 0 ? "in \(h)h \(mn)m" : "in \(h)h" }
         return "in \(m)m"
+    }
+
+    private func subscriptionDateOnly(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f.string(from: date)
     }
 
     private func absoluteShort(_ iso: String) -> String {

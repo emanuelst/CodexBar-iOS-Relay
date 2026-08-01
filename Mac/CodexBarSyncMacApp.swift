@@ -218,13 +218,11 @@ private struct MenuBarContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                if let d = sync.syncedAt {
-                    let iso = ISO8601DateFormatter().string(from: d)
-                    Text("Last sync: \(SyncFreshness.label(from: iso, now: context.date))")
-                } else {
-                    Text("No sync yet")
-                }
+            if let d = sync.syncedAt {
+                let iso = ISO8601DateFormatter().string(from: d)
+                Text("Last sync: \(SyncFreshness.label(from: iso, now: Date()))")
+            } else {
+                Text("No sync yet")
             }
             if sync.serverOK {
                 Text("Serving on :\(sync.serverPort)").font(.caption).foregroundStyle(.secondary)
