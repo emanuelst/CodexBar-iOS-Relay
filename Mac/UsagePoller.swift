@@ -6,8 +6,8 @@ private func logErr(_ s: String) {
     FileHandle.standardError.write(Data(("[codexbarsync] " + s + "\n").utf8))
 }
 
-/// Shells out to `codexbar usage --format json --provider all` every `interval`
-/// and publishes a `Payload` ready to serve to iOS.
+/// Reads CodexBar's 0.47.0 iCloud snapshot cache first, with the CLI path as a
+/// compatibility fallback for older/unsigned CodexBar installations.
 @MainActor
 final class UsagePoller: ObservableObject {
     @Published private(set) var payload: Payload?
@@ -28,6 +28,7 @@ final class UsagePoller: ObservableObject {
     private var nextCodexWebMetadataRefreshAt = Date.distantPast
     private static let webMetadataRefreshInterval: TimeInterval = 6 * 60 * 60
     private static let webMetadataRetryInterval: TimeInterval = 15 * 60
+    private let cloudSyncReader = CodexBarCloudSyncReader()
 
     init(interval: TimeInterval = 60) {
         self.interval = interval
@@ -54,6 +55,16 @@ final class UsagePoller: ObservableObject {
         defer { isPolling = false }
 
         do {
+            if let cloudPayload = cloudSyncReader.readPayload() {
+                let payload = self.payloadWithCachedCodexMetadata(cloudPayload)
+                self.payload = payload
+                self.syncedAt = ResetCountdown.date(from: payload.syncedAt)
+                self.lastError = nil
+                logErr("CodexBar iCloud snapshot ok: \(payload.usage.count) entries")
+                self.onUpdate?()
+                return
+            }
+
             let raw: Data
             do {
                 raw = try await runCodexbar(
@@ -98,6 +109,23 @@ final class UsagePoller: ObservableObject {
             guard let self, let metadata = await self.codexWebSubscriptionMetadata() else { return }
             self.applyCodexWebSubscriptionMetadata(metadata)
         }
+    }
+
+    private func payloadWithCachedCodexMetadata(_ payload: Payload) -> Payload {
+        guard cachedCodexSubscriptionMetadata != nil else { return payload }
+        let usage = payload.usage.map { entry in
+            guard entry.provider == "codex" else { return entry }
+            return codexEntryWithMetadata(
+                from: entry,
+                fallback: nil,
+                webMetadata: cachedCodexSubscriptionMetadata)
+        }
+        return Payload(
+            syncedAt: payload.syncedAt,
+            hostname: payload.hostname,
+            showUsed: payload.showUsed,
+            resetTimesShowAbsolute: payload.resetTimesShowAbsolute,
+            usage: usage)
     }
 
     /// Pre-encoded JSON the server hands out per request (avoids re-encoding on every hit).

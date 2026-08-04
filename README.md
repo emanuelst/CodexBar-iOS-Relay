@@ -4,7 +4,8 @@ Shows your [CodexBar](https://github.com/steipete/CodexBar) usage on iPhone by r
 
 Supports:
 - local LAN discovery via Bonjour
-- optional iCloud Drive snapshot sync
+- iCloud Drive snapshot sync for iPhone
+- CodexBar 0.47.0 iCloud/CloudKit usage snapshots as the Mac-side data source
 
 ## Status
 - Experimental and not fully tested.
@@ -13,9 +14,17 @@ Supports:
 - If you run more than one host on the same LAN, the iPhone currently adopts the first Bonjour result it sees.
 
 ## Requirements
-- `codexbar` installed on the Mac
+- CodexBar 0.47.0 or newer on the Mac
 - Xcode 26
 - Mac and iPhone on the same Wi‑Fi for LAN mode
+
+For the preferred source, enable **CodexBar → Settings → iCloud Sync** and
+**Sync usage snapshots** in the signed CodexBar release. The Relay reads
+CodexBar's local snapshot cache at:
+`~/Library/Application Support/com.steipete.codexbar/sync/engine-state.json`.
+It does not access CloudKit directly or sync credentials. The Mac Relay then
+writes the resulting, read-only payload to the user-selected iCloud Drive file
+so the iPhone app can consume it without a paid developer account.
 
 ## Run
 ```sh
@@ -28,7 +37,8 @@ In Xcode:
    If you later enable the optional iCloud entitlements, also replace the matching `com.changeme...` IDs in `Mac/CodexBarSyncMac.entitlements` and `iOS/CodexBarSynciOS.entitlements`.
 2. Set your signing team in Xcode before building to your devices.
 3. Run `CodexBarSyncMac` on your Mac.
-4. Run `CodexBarSynciOS` on your iPhone.
+4. Pick the same iCloud Drive JSON file once in the Mac Relay and iPhone Relay.
+5. Run `CodexBarSynciOS` on your iPhone.
 
 For iPhone installs, you need to pick your own Development Team for the iOS target.
 
