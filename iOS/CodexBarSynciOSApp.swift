@@ -4,7 +4,7 @@ import SwiftUI
 struct CodexBarSynciOSApp: App {
     @StateObject private var discovery = Discovery()
     @StateObject private var iCloud = ICloudDocumentStore()
-    @AppStorage("syncSource") private var syncSource: SyncSource = .icloudDrive
+    @AppStorage("syncSource") private var syncSource: SyncSource = .auto
     @AppStorage("tailscaleHost") private var tailscaleHost = ""
     @AppStorage("tailscalePort") private var tailscalePort = Int(RelayNetwork.defaultPort)
 
@@ -13,9 +13,13 @@ struct CodexBarSynciOSApp: App {
         // after this one-time migration from the old automatic default.
         let defaults = UserDefaults.standard
         let migrationKey = "syncSourceDefaultVersion"
-        if defaults.string(forKey: migrationKey) != "icloud-drive-v1" {
-            defaults.set(SyncSource.icloudDrive.rawValue, forKey: "syncSource")
-            defaults.set("icloud-drive-v1", forKey: migrationKey)
+        if defaults.string(forKey: migrationKey) != "network-icloud-v2" {
+            // Preserve an explicit iCloud Drive choice; old LAN, Tailscale,
+            // Automatic, and disabled CloudKit choices become Network mode.
+            if defaults.string(forKey: "syncSource") != SyncSource.icloudDrive.rawValue {
+                defaults.set(SyncSource.auto.rawValue, forKey: "syncSource")
+            }
+            defaults.set("network-icloud-v2", forKey: migrationKey)
         }
     }
 
@@ -42,13 +46,11 @@ struct CodexBarSynciOSApp: App {
 
     private func configureDiscovery() {
         switch syncSource {
-        case .lan, .auto:
-            discovery.startBonjour()
-        case .tailscale:
-            discovery.startDirect(
-                host: tailscaleHost,
+        case .auto:
+            discovery.startAutomatic(
+                tailscaleHost: tailscaleHost,
                 port: UInt16(clamping: tailscalePort))
-        case .icloudDrive, .icloudCloudKit:
+        case .icloudDrive:
             discovery.stop()
         }
     }
@@ -57,7 +59,7 @@ struct CodexBarSynciOSApp: App {
 struct ContentView: View {
     @EnvironmentObject var discovery: Discovery
     @EnvironmentObject var iCloud: ICloudDocumentStore
-    @AppStorage("syncSource") private var syncSource: SyncSource = .icloudDrive
+    @AppStorage("syncSource") private var syncSource: SyncSource = .auto
     @AppStorage("hidePersonalInfo") private var hidePersonalInfo = false
     @State private var showSettings = false
 
@@ -72,51 +74,39 @@ struct ContentView: View {
     /// Which source actually provided the current display data (for the badge).
     private var activeSourceLabel: String? {
         guard let display else { return nil }
-        let f = ISO8601DateFormatter()
-        let lanTime = discovery.payload.flatMap { f.date(from: $0.syncedAt) }
-        let cloudTime = iCloud.payload.flatMap { f.date(from: $0.syncedAt) }
         switch syncSource {
-        case .lan: return "Local"
-        case .tailscale: return "Tailscale"
         case .icloudDrive: return "iCloud Drive"
         case .auto:
-            if let l = lanTime, let c = cloudTime {
-                return l >= c ? "Auto · Local" : "Auto · iCloud Drive"
-            }
-            return lanTime != nil ? "Auto · Local" : (cloudTime != nil ? "Auto · iCloud Drive" : nil)
-        case .icloudCloudKit: return nil
+            return discovery.payload != nil ? "Network" : (iCloud.payload != nil ? "iCloud Drive" : nil)
         }
     }
 
     private var searching: Bool {
         switch syncSource {
-        case .lan, .tailscale: return discovery.payload == nil && discovery.lastError == nil
-        case .icloudDrive:
-            return iCloud.payload == nil && iCloud.lastError == nil && !iCloud.isDownloading
         case .auto:
             return discovery.payload == nil && iCloud.payload == nil
                 && discovery.lastError == nil && iCloud.lastError == nil && !iCloud.isDownloading
-        case .icloudCloudKit: return false
+        case .icloudDrive:
+            return iCloud.payload == nil && iCloud.lastError == nil && !iCloud.isDownloading
         }
     }
 
     private var statusText: String? {
         switch syncSource {
-        case .lan: return discovery.lastError ?? "Searching for your Mac on the local network…"
-        case .tailscale: return discovery.lastError ?? "Connecting to your Mac through Tailscale…"
+        case .auto:
+            if !iCloud.isConfigured && discovery.payload == nil {
+                return discovery.lastError ?? "Trying the network. Add an iCloud Drive file for fallback sync."
+            }
+            if iCloud.isDownloading { return iCloud.lastError }
+            if discovery.payload == nil && iCloud.payload == nil {
+                return iCloud.lastError ?? discovery.lastError ?? "Trying the network and iCloud Drive…"
+            }
+            return nil
         case .icloudDrive:
             if !iCloud.isConfigured { return "Pick an iCloud Drive file in Settings to start syncing." }
             if iCloud.isDownloading { return iCloud.lastError }
             if iCloud.payload == nil { return iCloud.lastError ?? "Waiting for the Mac to write the snapshot…" }
             return nil
-        case .auto:
-            if !iCloud.isConfigured && discovery.payload == nil {
-                return discovery.lastError ?? "Searching local network. Add an iCloud Drive file in Settings to sync anywhere."
-            }
-            if iCloud.isDownloading { return iCloud.lastError }
-            if discovery.payload == nil && iCloud.payload == nil { return "Searching local network and iCloud Drive…" }
-            return nil
-        case .icloudCloudKit: return nil
         }
     }
 
@@ -148,21 +138,17 @@ struct ContentView: View {
 
     private var bottomError: String? {
         switch syncSource {
-        case .lan, .tailscale: return discovery.lastError
-        case .icloudDrive: return iCloud.lastError
         case .auto: return (discovery.payload == nil && iCloud.payload == nil) ? (iCloud.lastError ?? discovery.lastError) : nil
-        case .icloudCloudKit: return nil
+        case .icloudDrive: return iCloud.lastError
         }
     }
 
     private func refreshCurrent() async {
         switch syncSource {
-        case .lan, .tailscale: await discovery.refresh()
-        case .icloudDrive: iCloud.refresh()
         case .auto:
             await discovery.refresh()
             iCloud.refresh()
-        case .icloudCloudKit: break
+        case .icloudDrive: iCloud.refresh()
         }
     }
 }
@@ -193,14 +179,14 @@ private struct SettingsSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if syncSource == .tailscale {
-                    Section("Tailscale / direct connection") {
+                if syncSource == .auto {
+                    Section("Optional Tailscale fallback") {
                         TextField("Mac Tailscale name or IP", text: $tailscaleHost)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                         TextField("Port", value: $tailscalePort, format: .number)
                             .keyboardType(.numberPad)
-                        Text("Use the Mac's MagicDNS name (for example macbook-pro) or its 100.x Tailscale IP. The Mac Relay listens on port \(RelayNetwork.defaultPort).")
+                        Text("Network mode tries Bonjour first, then this Tailscale name or IP if Bonjour is unavailable. The Mac Relay listens on port \(RelayNetwork.defaultPort).")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -235,7 +221,7 @@ private struct SettingsSheet: View {
                                 Label("Pick iCloud Drive file…", systemImage: "icloud")
                             }
                             if syncSource == .auto {
-                                Text("Optional in Automatic mode — without it, only local network is used.")
+                                Text("Optional in Network mode — without it, the app uses Bonjour and iCloud Drive fallback.")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -282,11 +268,8 @@ private struct SettingsSheet: View {
 
     private var footer: String {
         switch syncSource {
-        case .auto: "Uses whichever source has the freshest data — local network at home, iCloud Drive anywhere. Never silently falls back: it compares timestamps only."
-        case .lan: "Finds your Mac via Bonjour on the same Wi-Fi/LAN. Fastest, but only when both devices are on the same network."
-        case .tailscale: "Connects directly to the Mac Relay over Tailscale. Both devices must be connected to the same tailnet."
-        case .icloudDrive: "Reads a snapshot file your Mac writes to iCloud Drive. Works anywhere, no shared network needed. Pick the same file on both devices. Read-only on iPhone."
-        case .icloudCloudKit: "Proper iCloud sync via CloudKit — works anywhere with no file picking. Requires a paid Apple Developer account. Coming soon."
+        case .auto: "Tries the Mac Relay over the network (Bonjour, then optional Tailscale) and falls back to iCloud Drive."
+        case .icloudDrive: "Reads a snapshot file your Mac writes to iCloud Drive. Works anywhere, no shared network needed. Read-only on iPhone."
         }
     }
 

@@ -21,12 +21,27 @@ final class Discovery: ObservableObject {
     private var browser: NWBrowser?
     private var endpoint: NWEndpoint?
     private var pollTask: Task<Void, Never>?
+    private var automaticFallbackTask: Task<Void, Never>?
 
     func startBonjour() {
         if mode == .bonjour, browser != nil { return }
         stop()
         mode = .bonjour
         beginBonjourBrowse()
+    }
+
+    func startAutomatic(tailscaleHost: String, port: UInt16) {
+        stop()
+        mode = .bonjour
+        beginBonjourBrowse()
+
+        let host = tailscaleHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else { return }
+        automaticFallbackTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled, let self, self.payload == nil, self.mode == .bonjour else { return }
+            self.startDirect(host: host, port: port)
+        }
     }
 
     func startDirect(host: String, port: UInt16) {
@@ -58,6 +73,8 @@ final class Discovery: ObservableObject {
         browser = nil
         pollTask?.cancel()
         pollTask = nil
+        automaticFallbackTask?.cancel()
+        automaticFallbackTask = nil
         endpoint = nil
         payload = nil
         hostname = nil
@@ -77,6 +94,8 @@ final class Discovery: ObservableObject {
                 path: "/usage")
             if let payload = UsageJson.decodePayload(data) {
                 self.payload = payload
+                self.automaticFallbackTask?.cancel()
+                self.automaticFallbackTask = nil
                 self.hostname = payload.hostname
                 self.lastError = nil
                 self.isSearching = false
