@@ -72,7 +72,7 @@ final class ICloudDocumentStore: ObservableObject {
             return
         }
         payload = p
-        snapshotDate = ISO8601DateFormatter().date(from: p.syncedAt)
+        snapshotDate = ResetCountdown.date(from: p.syncedAt)
         lastError = nil
     }
 

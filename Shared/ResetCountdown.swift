@@ -4,9 +4,15 @@ import Foundation
 /// ponytail: replicated rather than parsing CodexBar's display string, since the CLI
 /// payload only carries `resetsAt` (ISO) — the countdown is computed at display time.
 public enum ResetCountdown {
+    /// Accept both CodexBar's fractional-second timestamps and ordinary ISO-8601.
+    public static func date(from iso: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+    }
     /// "in 2h 27m", "in 5d 3h", "in 30m", "now". Matches CodexBar (ceil to minutes).
     public static func countdown(from iso: String, now: Date = .init()) -> String? {
-        guard let d = ISO8601DateFormatter().date(from: iso) else { return nil }
+        guard let d = date(from: iso) else { return nil }
         let seconds = max(0, d.timeIntervalSince(now))
         if seconds < 1 { return "now" }
         let totalMinutes = max(1, Int(ceil(seconds / 60.0)))
@@ -25,7 +31,7 @@ public enum ResetCountdown {
     /// Absolute clock form: today → "6:30 PM", tomorrow → "tomorrow, 6:30 PM",
     /// else abbreviated date+time. Matches CodexBar's `resetDescription`.
     public static func absolute(from iso: String, now: Date = .init()) -> String? {
-        guard let d = ISO8601DateFormatter().date(from: iso) else { return nil }
+        guard let d = date(from: iso) else { return nil }
         let cal = Calendar.current
         if cal.isDate(d, inSameDayAs: now) {
             return d.formatted(date: .omitted, time: .shortened)
@@ -40,9 +46,10 @@ public enum ResetCountdown {
     /// Full reset line honoring the style. Prefers `resetsAt`; falls back to the
     /// provider's `resetDescription` (e.g. "0 / 5000 messages") when no ISO time.
     public static func resetLine(for limit: Limit, showAbsolute: Bool, now: Date = .init()) -> String? {
-        if let iso = limit.resetsAt {
-            let text = showAbsolute ? absolute(from: iso, now: now) : countdown(from: iso, now: now)
-            if let text { return "resets \(text)" }
+        if let iso = limit.resetsAt,
+           let absolute = absolute(from: iso, now: now),
+           let relative = countdown(from: iso, now: now) {
+            return "resets \(absolute) · \(relative)"
         }
         if let desc = limit.resetDescription?.trimmingCharacters(in: .whitespacesAndNewlines), !desc.isEmpty {
             if desc.lowercased().hasPrefix("resets") { return desc }
@@ -66,7 +73,7 @@ public enum SyncFreshness {
     public static let staleAfter: TimeInterval = 15 * 60
 
     public static func age(from iso: String, now: Date = .now) -> TimeInterval? {
-        guard let date = ISO8601DateFormatter().date(from: iso) else { return nil }
+        guard let date = ResetCountdown.date(from: iso) else { return nil }
         return max(0, now.timeIntervalSince(date))
     }
 

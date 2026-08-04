@@ -25,7 +25,7 @@ public struct UsagePace: Sendable {
         defaultWindowMinutes: Int = 10080
     ) -> UsagePace? {
         guard let minutes = windowMinutes, minutes > 0 else { return nil }
-        guard let reset = ISO8601DateFormatter().date(from: resetsAt) else { return nil }
+        guard let reset = ResetCountdown.date(from: resetsAt) else { return nil }
 
         let duration = TimeInterval(minutes) * 60
         let timeUntilReset = reset.timeIntervalSince(now)

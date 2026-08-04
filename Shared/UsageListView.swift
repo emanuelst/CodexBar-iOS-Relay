@@ -138,7 +138,7 @@ public struct ProviderRow: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
-                    if let iso = credit.expiresAt, let d = ISO8601DateFormatter().date(from: iso) {
+                    if let iso = credit.expiresAt, let d = ResetCountdown.date(from: iso) {
                         Text("expires \(absoluteShort(iso)) · \(countdownTo(d))")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
@@ -161,8 +161,8 @@ public struct ProviderRow: View {
 
     @ViewBuilder
     private func planDateLine(_ label: String, _ iso: String) -> some View {
-        if let date = ISO8601DateFormatter().date(from: iso) {
-            Text("\(label) \(subscriptionDateOnly(date))")
+        if let date = ResetCountdown.date(from: iso) {
+            Text("\(label) \(subscriptionDateOnly(date)) · \(ResetCountdown.countdown(from: iso) ?? "now")")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.tint)
         }
@@ -186,7 +186,7 @@ public struct ProviderRow: View {
     }
 
     private func absoluteShort(_ iso: String) -> String {
-        guard let d = ISO8601DateFormatter().date(from: iso) else { return iso }
+        guard let d = ResetCountdown.date(from: iso) else { return iso }
         let f = DateFormatter()
         f.dateStyle = .short
         f.timeStyle = .short
