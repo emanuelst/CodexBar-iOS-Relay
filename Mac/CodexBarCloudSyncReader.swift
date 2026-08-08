@@ -5,6 +5,11 @@ import Foundation
 /// CodexBar remains the entitled CloudKit client and this reader only consumes
 /// its local, owner-readable cache.
 struct CodexBarCloudSyncReader {
+    /// A stale CloudKit cache must not mask a live local CodexBar CLI result.
+    /// Relay polls every minute, so five minutes allows normal propagation while
+    /// still letting the CLI fallback recover when CodexBar is not syncing.
+    private static let maximumSnapshotAge: TimeInterval = 5 * 60
+
     private struct EngineState: Decodable {
         let fleetDevices: [String: Device]?
         let fleetSnapshots: [String: Snapshot]?
@@ -116,6 +121,12 @@ struct CodexBarCloudSyncReader {
 
         guard !entries.isEmpty else { return nil }
         let latest = snapshots.values.map(\.fetchedAt).max() ?? Date()
+        let age = Date().timeIntervalSince(latest)
+        guard age <= Self.maximumSnapshotAge else {
+            FileHandle.standardError.write(
+                Data(("[codexbarsync] CodexBar iCloud snapshot stale (\(Int(age))s); using live CLI fallback\n").utf8))
+            return nil
+        }
         let hostname = devices.values.first?.hostName
             ?? Host.current().localizedName
             ?? "Mac"
