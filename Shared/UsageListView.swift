@@ -162,7 +162,7 @@ public struct ProviderRow: View {
     @ViewBuilder
     private func planDateLine(_ label: String, _ iso: String) -> some View {
         if let date = ResetCountdown.date(from: iso) {
-            Text("\(label) \(subscriptionDateOnly(date)) · \(ResetCountdown.countdown(from: iso) ?? "now")")
+            Text("\(label) \(subscriptionDateTime(date)) · \(ResetCountdown.countdown(from: iso) ?? "now")")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.tint)
         }
@@ -178,10 +178,10 @@ public struct ProviderRow: View {
         return "in \(m)m"
     }
 
-    private func subscriptionDateOnly(_ date: Date) -> String {
+    private func subscriptionDateTime(_ date: Date) -> String {
         let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .none
+        f.setLocalizedDateFormatFromTemplate("EEE MMM d yyyy")
+        f.timeStyle = .short
         return f.string(from: date)
     }
 

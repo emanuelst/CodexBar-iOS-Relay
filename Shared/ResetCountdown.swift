@@ -40,7 +40,7 @@ public enum ResetCountdown {
            cal.isDate(d, inSameDayAs: tomorrow) {
             return "tomorrow, \(d.formatted(date: .omitted, time: .shortened))"
         }
-        return d.formatted(date: .abbreviated, time: .shortened)
+        return d.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year().hour().minute())
     }
 
     /// Full reset line honoring the style. Prefers `resetsAt`; falls back to the
