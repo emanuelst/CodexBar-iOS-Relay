@@ -55,7 +55,7 @@ public struct ProviderRow: View {
     private func footer(_ usage: Usage) -> some View {
         Group {
             if let updated = usage.updatedAt {
-                Text("updated \(absoluteShort(updated))")
+                Text("updated \(SyncFreshness.relativeAgeLabel(from: updated))")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -76,7 +76,7 @@ public struct ProviderRow: View {
             HStack {
                 Text(label).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Text(String(format: "%.1f%%", displayed))
+                Text(percentageText(displayed, wholeNumberIfIntegral: label == "Primary" || label == "Secondary"))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(percentColor(displayed, showUsed: showUsed))
             }
@@ -92,6 +92,13 @@ public struct ProviderRow: View {
                     .lineLimit(2)
             }
         }
+    }
+
+    private func percentageText(_ value: Double, wholeNumberIfIntegral: Bool) -> String {
+        if wholeNumberIfIntegral, value.rounded() == value {
+            return "\(Int(value.rounded()))%"
+        }
+        return String(format: "%.1f%%", value)
     }
 
     private func percentColor(_ displayed: Double, showUsed: Bool) -> Color {
@@ -179,10 +186,7 @@ public struct ProviderRow: View {
     }
 
     private func subscriptionDateTime(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate("EEE MMM d yyyy")
-        f.timeStyle = .short
-        return f.string(from: date)
+        date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year().hour().minute())
     }
 
     private func absoluteShort(_ iso: String) -> String {

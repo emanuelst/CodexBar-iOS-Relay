@@ -84,6 +84,15 @@ public enum SyncFreshness {
         return .fresh
     }
 
+    public static func relativeAgeLabel(from iso: String, now: Date = .now) -> String {
+        guard let age = age(from: iso, now: now) else { return "unknown" }
+        if age < 5 { return "just now" }
+        if age < 60 { return "\(Int(age))s ago" }
+        if age < 3600 { return "\(Int(age / 60))m ago" }
+        if age < 86400 { return "\(Int(age / 3600))h ago" }
+        return "\(Int(age / 86400))d ago"
+    }
+
     public static func label(from iso: String, now: Date = .now) -> String {
         guard let age = age(from: iso, now: now) else { return "last sync unknown" }
         let prefix = age >= staleAfter ? "last synced" : "synced"
