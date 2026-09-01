@@ -20,6 +20,7 @@ public struct ProviderRow: View {
                 if let p = usage.primary { limitView("Primary", p); paceLine(for: p) }
                 if let s = usage.secondary { limitView("Secondary", s); paceLine(for: s) }
                 if let t = usage.tertiary { limitView("Tertiary", t); paceLine(for: t) }
+                gptReserveView(usage.extraRateWindows)
                 resetCreditsView(usage.codexResetCredits)
                 subscriptionMetadataView(usage)
                 footer(usage)
@@ -125,6 +126,21 @@ public struct ProviderRow: View {
                 .foregroundStyle(paceColor(pace))
                 .padding(.top, 1)
         }
+    }
+
+    @ViewBuilder
+    private func gptReserveView(_ windows: [NamedLimit]?) -> some View {
+        ForEach((windows ?? []).filter(Self.isGPTReserve), id: \.id) { reserve in
+            limitView(reserve.title, reserve.window)
+            paceLine(for: reserve.window)
+        }
+    }
+
+    private static func isGPTReserve(_ window: NamedLimit) -> Bool {
+        guard window.usageKnown != false else { return false }
+        let id = window.id.lowercased()
+        let title = window.title.lowercased()
+        return id == "codex-base-model-inference" || id.contains("gpt-reserve") || title.contains("gpt reserve")
     }
 
     @ViewBuilder

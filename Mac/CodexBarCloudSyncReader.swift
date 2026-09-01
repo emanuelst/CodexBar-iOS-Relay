@@ -32,6 +32,7 @@ struct CodexBarCloudSyncReader {
         let primary: SnapshotLimit?
         let secondary: SnapshotLimit?
         let tertiary: SnapshotLimit?
+        let extraRateWindows: [SnapshotNamedLimit]?
         let accountEmail: String?
         let loginMethod: String?
         let codexResetCredits: SnapshotResetCredits?
@@ -45,6 +46,13 @@ struct CodexBarCloudSyncReader {
         let resetsAt: Date?
         let resetDescription: String?
         let usedPercent: Double?
+    }
+
+    private struct SnapshotNamedLimit: Decodable {
+        let id: String
+        let title: String
+        let window: SnapshotLimit
+        let usageKnown: Bool?
     }
 
     private struct SnapshotResetCredits: Decodable {
@@ -152,6 +160,7 @@ struct CodexBarCloudSyncReader {
                 primary: usage.primary.map(self.limit),
                 secondary: usage.secondary.map(self.limit),
                 tertiary: usage.tertiary.map(self.limit),
+                extraRateWindows: usage.extraRateWindows?.map(self.namedLimit),
                 codexResetCredits: usage.codexResetCredits.map(self.resetCredits),
                 subscriptionRenewsAt: usage.subscriptionRenewsAt.map(Self.iso8601.string),
                 subscriptionExpiresAt: usage.subscriptionExpiresAt.map(Self.iso8601.string)),
@@ -177,6 +186,14 @@ struct CodexBarCloudSyncReader {
             resetsAt: value.resetsAt.map(Self.iso8601.string),
             resetDescription: value.resetDescription,
             usedPercent: value.usedPercent)
+    }
+
+    private func namedLimit(_ value: SnapshotNamedLimit) -> NamedLimit {
+        NamedLimit(
+            id: value.id,
+            title: value.title,
+            window: self.limit(value.window),
+            usageKnown: value.usageKnown)
     }
 
     static func defaultFileURL() -> URL {

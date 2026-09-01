@@ -28,22 +28,33 @@ public struct Usage: Codable, Hashable {
     public let primary: Limit?
     public let secondary: Limit?
     public let tertiary: Limit?
+    /// Optional named quota lanes from CodexBar, such as GPT Reserve.
+    public let extraRateWindows: [NamedLimit]?
     public let codexResetCredits: CodexResetCredits?
     /// Optional provider-supplied subscription metadata. CodexBar may omit these.
     public let subscriptionRenewsAt: String?
     public let subscriptionExpiresAt: String?
 
-    public init(accountEmail: String?, updatedAt: String?, loginMethod: String?, primary: Limit?, secondary: Limit?, tertiary: Limit?, codexResetCredits: CodexResetCredits?, subscriptionRenewsAt: String? = nil, subscriptionExpiresAt: String? = nil) {
+    public init(accountEmail: String?, updatedAt: String?, loginMethod: String?, primary: Limit?, secondary: Limit?, tertiary: Limit?, extraRateWindows: [NamedLimit]? = nil, codexResetCredits: CodexResetCredits?, subscriptionRenewsAt: String? = nil, subscriptionExpiresAt: String? = nil) {
         self.accountEmail = accountEmail
         self.updatedAt = updatedAt
         self.loginMethod = loginMethod
         self.primary = primary
         self.secondary = secondary
         self.tertiary = tertiary
+        self.extraRateWindows = extraRateWindows
         self.codexResetCredits = codexResetCredits
         self.subscriptionRenewsAt = subscriptionRenewsAt
         self.subscriptionExpiresAt = subscriptionExpiresAt
     }
+}
+
+public struct NamedLimit: Codable, Hashable {
+    public let id: String
+    public let title: String
+    public let window: Limit
+    /// Older Relay payloads omitted this field; absence means the usage is known.
+    public let usageKnown: Bool?
 }
 
 /// Codex rate-limit reset credits (codex provider only). Lives under `usage`.

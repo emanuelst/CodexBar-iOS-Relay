@@ -20,6 +20,7 @@ final class UsagePoller: ObservableObject {
     private var timer: Timer?
     private var isPolling = false
     private struct CodexSubscriptionMetadata {
+        let accountEmail: String?
         let renewsAt: String?
         let expiresAt: String?
     }
@@ -53,6 +54,9 @@ final class UsagePoller: ObservableObject {
         }
         isPolling = true
         defer { isPolling = false }
+        if let diskMetadata = Self.loadCachedCodexSubscriptionMetadata() {
+            cachedCodexSubscriptionMetadata = diskMetadata
+        }
 
         do {
             if let cloudPayload = cloudSyncReader.readPayload() {
@@ -186,9 +190,20 @@ final class UsagePoller: ObservableObject {
         guard let cliUsage = cliCodex.usage else { return cliCodex }
         let fallbackUsage = defaultCodex?.usage
         let credits = cliUsage.codexResetCredits ?? fallbackUsage?.codexResetCredits
-        let renewsAt = cliUsage.subscriptionRenewsAt ?? fallbackUsage?.subscriptionRenewsAt ?? webMetadata?.renewsAt
-        let expiresAt = cliUsage.subscriptionExpiresAt ?? fallbackUsage?.subscriptionExpiresAt ?? webMetadata?.expiresAt
+        // The CLI endpoint supplies reset credits but may omit optional named lanes such as
+        // GPT Reserve. Keep a non-empty Auto/Web value rather than replacing it with [].
+        let extraRateWindows = cliUsage.extraRateWindows?.isEmpty == false
+            ? cliUsage.extraRateWindows
+            : fallbackUsage?.extraRateWindows
+        let metadataMatchesAccount = Self.metadataMatchesAccount(webMetadata, usage: cliUsage)
+        let renewsAt = cliUsage.subscriptionRenewsAt
+            ?? fallbackUsage?.subscriptionRenewsAt
+            ?? (metadataMatchesAccount ? webMetadata?.renewsAt : nil)
+        let expiresAt = cliUsage.subscriptionExpiresAt
+            ?? fallbackUsage?.subscriptionExpiresAt
+            ?? (metadataMatchesAccount ? webMetadata?.expiresAt : nil)
         guard credits != cliUsage.codexResetCredits
+            || extraRateWindows != cliUsage.extraRateWindows
             || renewsAt != cliUsage.subscriptionRenewsAt
             || expiresAt != cliUsage.subscriptionExpiresAt
         else { return cliCodex }
@@ -200,6 +215,7 @@ final class UsagePoller: ObservableObject {
             primary: cliUsage.primary,
             secondary: cliUsage.secondary,
             tertiary: cliUsage.tertiary,
+            extraRateWindows: extraRateWindows,
             codexResetCredits: credits,
             subscriptionRenewsAt: renewsAt,
             subscriptionExpiresAt: expiresAt
@@ -214,17 +230,34 @@ final class UsagePoller: ObservableObject {
     }
 
     private static func loadCachedCodexSubscriptionMetadata() -> CodexSubscriptionMetadata? {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/com.steipete.codexbar/openai-dashboard.json")
+        let appSupport = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.steipete.codexbar")
+        let url = appSupport.appendingPathComponent("openai-dashboard.json")
         guard let data = try? Data(contentsOf: url),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let snapshot = root["snapshot"] as? [String: Any]
         else { return nil }
         let metadata = CodexSubscriptionMetadata(
+            accountEmail: root["accountEmail"] as? String
+                ?? snapshot["signedInEmail"] as? String,
             renewsAt: snapshot["subscriptionRenewsAt"] as? String,
             expiresAt: snapshot["subscriptionExpiresAt"] as? String)
-        guard metadata.renewsAt != nil || metadata.expiresAt != nil else { return nil }
-        return metadata
+        if metadata.renewsAt != nil || metadata.expiresAt != nil { return metadata }
+        return nil
+    }
+
+    private static func metadataMatchesAccount(
+        _ metadata: CodexSubscriptionMetadata?,
+        usage: Usage) -> Bool
+    {
+        guard let cachedEmail = metadata?.accountEmail,
+              let currentEmail = usage.accountEmail
+        else { return true }
+        return normalizeEmail(cachedEmail) == normalizeEmail(currentEmail)
+    }
+
+    private static func normalizeEmail(_ email: String) -> String {
+        email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func applyCodexWebSubscriptionMetadata(_ metadata: CodexSubscriptionMetadata) {
@@ -267,6 +300,7 @@ final class UsagePoller: ObservableObject {
             }
 
             let metadata = CodexSubscriptionMetadata(
+                accountEmail: usage.accountEmail,
                 renewsAt: usage.subscriptionRenewsAt,
                 expiresAt: usage.subscriptionExpiresAt
             )
