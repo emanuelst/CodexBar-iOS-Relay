@@ -54,7 +54,7 @@ targets:
       - path: iOS/Assets.xcassets
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.changeme.codexbarrelay.ios
+        PRODUCT_BUNDLE_IDENTIFIER: com.emanuelstadler.codexbarrelay.ios
         PRODUCT_NAME: CodexBarRelay
         TARGETED_DEVICE_FAMILY: "1"
         # Enable iCloud KV sync (paid team only). Uncomment when you have a paid account:
