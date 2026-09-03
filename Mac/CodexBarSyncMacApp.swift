@@ -35,13 +35,6 @@ struct CodexBarSyncMacApp: App {
             MacRootView().environmentObject(sync)
         }
         .defaultSize(width: 380, height: 560)
-
-        MenuBarExtra {
-            MenuBarContent().environmentObject(sync)
-        } label: {
-            Image(systemName: sync.lastError == nil ? "gauge.with.dots.needle.bottom.50percent" : "exclamationmark.triangle")
-        }
-        .menuBarExtraStyle(.menu)
     }
 }
 

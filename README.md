@@ -36,7 +36,7 @@ In Xcode:
 1. Change `com.changeme.*` bundle IDs in `project.yml`.
    If you later enable the optional iCloud entitlements, also replace the matching `com.changeme...` IDs in `Mac/CodexBarSyncMac.entitlements` and `iOS/CodexBarSynciOS.entitlements`.
 2. Set your signing team in Xcode before building to your devices.
-3. Run `CodexBarSyncMac` on your Mac.
+3. Run `CodexBarSyncMac` on your Mac. The relay runs from its window and does not add a menu-bar icon.
 4. Pick the same iCloud Drive JSON file once in the Mac Relay and iPhone Relay.
 5. Run `CodexBarSynciOS` on your iPhone.
 
