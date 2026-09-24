@@ -4,6 +4,26 @@ import Foundation
 /// ponytail: replicated rather than parsing CodexBar's display string, since the CLI
 /// payload only carries `resetsAt` (ISO) — the countdown is computed at display time.
 public enum ResetCountdown {
+    /// Labels the local timezone used when rendering absolute dates.
+    public static func localTimeZoneLabel() -> String {
+        let timeZone = TimeZone.current
+        let offset = timeZone.secondsFromGMT()
+        return "\(timeZone.identifier) \(localTimeZoneOffsetLabel(for: offset))"
+    }
+
+    /// Returns the local UTC offset used beside individual absolute dates.
+    public static func localTimeZoneOffsetLabel() -> String {
+        localTimeZoneOffsetLabel(for: TimeZone.current.secondsFromGMT())
+    }
+
+    private static func localTimeZoneOffsetLabel(for offset: Int) -> String {
+        let sign = offset < 0 ? "-" : "+"
+        let absoluteOffset = abs(offset)
+        let hours = absoluteOffset / 3600
+        let minutes = (absoluteOffset % 3600) / 60
+        return String(format: "(UTC%@%02d:%02d)", sign, hours, minutes)
+    }
+
     /// Accept both CodexBar's fractional-second timestamps and ordinary ISO-8601.
     public static func date(from iso: String) -> Date? {
         let fractional = ISO8601DateFormatter()
@@ -34,13 +54,13 @@ public enum ResetCountdown {
         guard let d = date(from: iso) else { return nil }
         let cal = Calendar.current
         if cal.isDate(d, inSameDayAs: now) {
-            return d.formatted(date: .omitted, time: .shortened)
+            return "\(d.formatted(date: .omitted, time: .shortened)) \(localTimeZoneOffsetLabel())"
         }
         if let tomorrow = cal.date(byAdding: .day, value: 1, to: now),
            cal.isDate(d, inSameDayAs: tomorrow) {
-            return "tomorrow, \(d.formatted(date: .omitted, time: .shortened))"
+            return "tomorrow, \(d.formatted(date: .omitted, time: .shortened)) \(localTimeZoneOffsetLabel())"
         }
-        return d.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year().hour().minute())
+        return "\(d.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year().hour().minute())) \(localTimeZoneOffsetLabel())"
     }
 
     /// Full reset line honoring the style. Prefers `resetsAt`; falls back to the

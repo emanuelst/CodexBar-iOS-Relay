@@ -202,7 +202,7 @@ public struct ProviderRow: View {
     }
 
     private func subscriptionDateTime(_ date: Date) -> String {
-        date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year().hour().minute())
+        "\(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year().hour().minute())) \(ResetCountdown.localTimeZoneOffsetLabel())"
     }
 
     private func absoluteShort(_ iso: String) -> String {
@@ -210,7 +210,7 @@ public struct ProviderRow: View {
         let f = DateFormatter()
         f.dateStyle = .short
         f.timeStyle = .short
-        return f.string(from: d)
+        return "\(f.string(from: d)) \(ResetCountdown.localTimeZoneOffsetLabel())"
     }
 }
 
@@ -281,6 +281,9 @@ public struct UsageListView: View {
                         .font(.caption.monospacedDigit())
                 }
                 .foregroundStyle(syncColor(for: payload.syncedAt, now: now))
+                Text("Times: \(ResetCountdown.localTimeZoneLabel())")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
                 HStack(spacing: 6) {
                     Spacer()
                     if let badge = sourceBadge {

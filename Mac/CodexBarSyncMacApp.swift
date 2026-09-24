@@ -162,8 +162,14 @@ private struct MacRootView: View {
                 .toggleStyle(.button)
                 .buttonStyle(.borderless)
                 .help(hidePersonalInfo ? "Show personal information" : "Hide personal information for screenshots")
-                Button("Refresh") { Task { await sync.refreshNow() } }
-                    .buttonStyle(.borderless)
+                Button {
+                    Task { await sync.refreshNow() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh now")
+                .accessibilityLabel("Refresh")
             }
             .padding(8)
             if let s = sync.iCloudWriter.statusText, sync.iCloudWriter.isConfigured {
