@@ -21,7 +21,8 @@ public enum ResetCountdown {
         let absoluteOffset = abs(offset)
         let hours = absoluteOffset / 3600
         let minutes = (absoluteOffset % 3600) / 60
-        return String(format: "(UTC%@%02d:%02d)", sign, hours, minutes)
+        let minuteText = minutes == 0 ? "" : String(format: ":%02d", minutes)
+        return "(UTC\(sign)\(hours)\(minuteText))"
     }
 
     /// Accept both CodexBar's fractional-second timestamps and ordinary ISO-8601.
@@ -48,19 +49,30 @@ public enum ResetCountdown {
         return "in \(totalMinutes)m"
     }
 
-    /// Absolute clock form: today → "6:30 PM", tomorrow → "tomorrow, 6:30 PM",
-    /// else abbreviated date+time. Matches CodexBar's `resetDescription`.
+    /// Consistent absolute form: "Sat, Oct 3 · 19:10 (UTC+2)".
+    /// The year is included when it differs from the current year.
     public static func absolute(from iso: String, now: Date = .init()) -> String? {
         guard let d = date(from: iso) else { return nil }
-        let cal = Calendar.current
-        if cal.isDate(d, inSameDayAs: now) {
-            return "\(d.formatted(date: .omitted, time: .shortened)) \(localTimeZoneOffsetLabel())"
-        }
-        if let tomorrow = cal.date(byAdding: .day, value: 1, to: now),
-           cal.isDate(d, inSameDayAs: tomorrow) {
-            return "tomorrow, \(d.formatted(date: .omitted, time: .shortened)) \(localTimeZoneOffsetLabel())"
-        }
-        return "\(d.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year().hour().minute())) \(localTimeZoneOffsetLabel())"
+        return absoluteDateTime(d, now: now)
+    }
+
+    /// Formats an absolute date consistently across reset, credit, and plan rows.
+    public static func absoluteDateTime(_ date: Date, now: Date = .init()) -> String {
+        let calendar = Calendar.current
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.timeZone = .current
+        dateFormatter.dateFormat = calendar.isDate(date, equalTo: now, toGranularity: .year)
+            ? "EEE, MMM d"
+            : "EEE, MMM d, yyyy"
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.locale = Locale(identifier: "en_US_POSIX")
+        timeFormatter.timeZone = .current
+        timeFormatter.dateFormat = "HH:mm"
+
+        let offset = TimeZone.current.secondsFromGMT(for: date)
+        return "\(dateFormatter.string(from: date)) · \(timeFormatter.string(from: date)) \(localTimeZoneOffsetLabel(for: offset))"
     }
 
     /// Full reset line honoring the style. Prefers `resetsAt`; falls back to the

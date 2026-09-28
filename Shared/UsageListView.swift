@@ -202,15 +202,12 @@ public struct ProviderRow: View {
     }
 
     private func subscriptionDateTime(_ date: Date) -> String {
-        "\(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year().hour().minute())) \(ResetCountdown.localTimeZoneOffsetLabel())"
+        ResetCountdown.absoluteDateTime(date)
     }
 
     private func absoluteShort(_ iso: String) -> String {
         guard let d = ResetCountdown.date(from: iso) else { return iso }
-        let f = DateFormatter()
-        f.dateStyle = .short
-        f.timeStyle = .short
-        return "\(f.string(from: d)) \(ResetCountdown.localTimeZoneOffsetLabel())"
+        return ResetCountdown.absoluteDateTime(d)
     }
 }
 
