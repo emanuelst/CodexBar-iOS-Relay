@@ -5,12 +5,14 @@ public struct ProviderRow: View {
     public let showUsed: Bool
     public let showAbsolute: Bool
     public let hidePersonalInfo: Bool
+    public let now: Date
 
-    public init(entry: UsageEntry, showUsed: Bool = false, showAbsolute: Bool = false, hidePersonalInfo: Bool = false) {
+    public init(entry: UsageEntry, showUsed: Bool = false, showAbsolute: Bool = false, hidePersonalInfo: Bool = false, now: Date = .now) {
         self.entry = entry
         self.showUsed = showUsed
         self.showAbsolute = showAbsolute
         self.hidePersonalInfo = hidePersonalInfo
+        self.now = now
     }
 
     public var body: some View {
@@ -56,7 +58,7 @@ public struct ProviderRow: View {
     private func footer(_ usage: Usage) -> some View {
         Group {
             if let updated = usage.updatedAt {
-                Text("updated \(SyncFreshness.relativeAgeLabel(from: updated))")
+                Text("updated \(SyncFreshness.relativeAgeLabel(from: updated, now: now))")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -86,7 +88,7 @@ public struct ProviderRow: View {
                 #if os(iOS)
                 .scaleEffect(y: 1.1)
                 #endif
-            if let line = ResetCountdown.resetLine(for: limit, showAbsolute: showAbsolute) {
+            if let line = ResetCountdown.resetLine(for: limit, showAbsolute: showAbsolute, now: now) {
                 Text(line)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
@@ -120,7 +122,7 @@ public struct ProviderRow: View {
 
     @ViewBuilder
     private func paceLine(for limit: Limit) -> some View {
-        if let pace = UsagePaceText.summary(for: limit) {
+        if let pace = UsagePaceText.summary(for: limit, now: now) {
             Text(pace)
                 .font(.caption2)
                 .foregroundStyle(paceColor(pace))
@@ -185,14 +187,14 @@ public struct ProviderRow: View {
     @ViewBuilder
     private func planDateLine(_ label: String, _ iso: String) -> some View {
         if let date = ResetCountdown.date(from: iso) {
-            Text("\(label) \(subscriptionDateTime(date)) · \(ResetCountdown.countdown(from: iso) ?? "now")")
+            Text("\(label) \(subscriptionDateTime(date)) · \(ResetCountdown.countdown(from: iso, now: now) ?? "now")")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.tint)
         }
     }
 
     private func countdownTo(_ date: Date) -> String {
-        let s = max(0, date.timeIntervalSince(.now))
+        let s = max(0, date.timeIntervalSince(now))
         let m = max(1, Int(ceil(s / 60.0)))
         let d = m / (24 * 60)
         let h = (m / 60) % 24
@@ -202,12 +204,12 @@ public struct ProviderRow: View {
     }
 
     private func subscriptionDateTime(_ date: Date) -> String {
-        ResetCountdown.absoluteDateTime(date)
+        ResetCountdown.absoluteDateTime(date, now: now)
     }
 
     private func absoluteShort(_ iso: String) -> String {
         guard let d = ResetCountdown.date(from: iso) else { return iso }
-        return ResetCountdown.absoluteDateTime(d)
+        return ResetCountdown.absoluteDateTime(d, now: now)
     }
 }
 
@@ -234,13 +236,13 @@ public struct UsageListView: View {
                 let usable = payload.usage.filter { $0.hasUsage }
                 let errored = payload.usage.filter { !$0.hasUsage }
                 Section {
-                    ForEach(usable, id: \.self) { ProviderRow(entry: $0, showUsed: payload.showUsed, showAbsolute: payload.resetTimesShowAbsolute, hidePersonalInfo: hidePersonalInfo) }
+                    ForEach(usable, id: \.self) { ProviderRow(entry: $0, showUsed: payload.showUsed, showAbsolute: payload.resetTimesShowAbsolute, hidePersonalInfo: hidePersonalInfo, now: context.date) }
                 } header: {
                     Text("\(usable.count) providers")
                 }
                 if !errored.isEmpty {
                     Section {
-                        ForEach(errored, id: \.self) { ProviderRow(entry: $0, showUsed: payload.showUsed, showAbsolute: payload.resetTimesShowAbsolute, hidePersonalInfo: hidePersonalInfo) }
+                        ForEach(errored, id: \.self) { ProviderRow(entry: $0, showUsed: payload.showUsed, showAbsolute: payload.resetTimesShowAbsolute, hidePersonalInfo: hidePersonalInfo, now: context.date) }
                     } header: {
                         Text("\(errored.count) unavailable")
                     }
