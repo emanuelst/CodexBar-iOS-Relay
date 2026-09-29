@@ -117,12 +117,13 @@ struct CodexBarCloudSyncReader {
         }
 
         let devices = state.fleetDevices ?? [:]
-        let entries = snapshots.values
-            .filter { $0.schemaVersion <= 1 }
-            .sorted { lhs, rhs in
-                if lhs.provider != rhs.provider { return lhs.provider < rhs.provider }
-                return lhs.fetchedAt > rhs.fetchedAt
-            }
+        // The fleet cache can retain inactive account snapshots. CodexBar's main
+        // menu shows one selected account per provider, so mirror that surface by
+        // using the newest snapshot for each provider rather than rendering every
+        // retained account as a duplicate provider row.
+        let entries = Dictionary(grouping: snapshots.values.filter { $0.schemaVersion <= 1 }, by: \.provider)
+            .compactMap { _, providerSnapshots in providerSnapshots.max { $0.fetchedAt < $1.fetchedAt } }
+            .sorted { $0.provider < $1.provider }
             .map { snapshot in
                 self.entry(for: snapshot)
             }
