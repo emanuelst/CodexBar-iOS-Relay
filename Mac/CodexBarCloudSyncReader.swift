@@ -116,12 +116,23 @@ struct CodexBarCloudSyncReader {
             return nil
         }
 
+        let now = Date()
+        let freshSnapshots = snapshots.values.filter {
+            $0.schemaVersion <= 1 && now.timeIntervalSince($0.fetchedAt) <= Self.maximumSnapshotAge
+        }
+        guard !freshSnapshots.isEmpty else {
+            let latest = snapshots.values.map(\.fetchedAt).max() ?? now
+            FileHandle.standardError.write(
+                Data(("[codexbarsync] CodexBar iCloud snapshot stale (\(Int(now.timeIntervalSince(latest)))s); using live CLI fallback\n").utf8))
+            return nil
+        }
+
         let devices = state.fleetDevices ?? [:]
         // The fleet cache can retain inactive account snapshots. CodexBar's main
         // menu shows one selected account per provider, so mirror that surface by
         // using the newest snapshot for each provider rather than rendering every
         // retained account as a duplicate provider row.
-        let entries = Dictionary(grouping: snapshots.values.filter { $0.schemaVersion <= 1 }, by: \.provider)
+        let entries = Dictionary(grouping: freshSnapshots, by: \.provider)
             .compactMap { _, providerSnapshots in providerSnapshots.max { $0.fetchedAt < $1.fetchedAt } }
             .sorted { $0.provider < $1.provider }
             .map { snapshot in
@@ -129,13 +140,7 @@ struct CodexBarCloudSyncReader {
             }
 
         guard !entries.isEmpty else { return nil }
-        let latest = snapshots.values.map(\.fetchedAt).max() ?? Date()
-        let age = Date().timeIntervalSince(latest)
-        guard age <= Self.maximumSnapshotAge else {
-            FileHandle.standardError.write(
-                Data(("[codexbarsync] CodexBar iCloud snapshot stale (\(Int(age))s); using live CLI fallback\n").utf8))
-            return nil
-        }
+        let latest = freshSnapshots.map(\.fetchedAt).max() ?? now
         let hostname = devices.values.first?.hostName
             ?? Host.current().localizedName
             ?? "Mac"
