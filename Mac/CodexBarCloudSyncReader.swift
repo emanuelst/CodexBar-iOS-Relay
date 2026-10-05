@@ -46,6 +46,7 @@ struct CodexBarCloudSyncReader {
         let resetsAt: Date?
         let resetDescription: String?
         let usedPercent: Double?
+        let isSyntheticPlaceholder: Bool?
     }
 
     private struct SnapshotNamedLimit: Decodable {
@@ -163,9 +164,9 @@ struct CodexBarCloudSyncReader {
                 accountEmail: usage.accountEmail,
                 updatedAt: Self.iso8601.string(from: usage.updatedAt),
                 loginMethod: usage.loginMethod,
-                primary: usage.primary.map(self.limit),
-                secondary: usage.secondary.map(self.limit),
-                tertiary: usage.tertiary.map(self.limit),
+                primary: self.knownLimit(usage.primary),
+                secondary: self.knownLimit(usage.secondary),
+                tertiary: self.knownLimit(usage.tertiary),
                 extraRateWindows: usage.extraRateWindows?.map(self.namedLimit),
                 codexResetCredits: usage.codexResetCredits.map(self.resetCredits),
                 subscriptionRenewsAt: usage.subscriptionRenewsAt.map(Self.iso8601.string),
@@ -192,6 +193,11 @@ struct CodexBarCloudSyncReader {
             resetsAt: value.resetsAt.map(Self.iso8601.string),
             resetDescription: value.resetDescription,
             usedPercent: value.usedPercent)
+    }
+
+    private func knownLimit(_ value: SnapshotLimit?) -> Limit? {
+        guard let value, value.isSyntheticPlaceholder != true else { return nil }
+        return self.limit(value)
     }
 
     private func namedLimit(_ value: SnapshotNamedLimit) -> NamedLimit {

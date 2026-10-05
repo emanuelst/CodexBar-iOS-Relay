@@ -19,10 +19,16 @@ public struct ProviderRow: View {
         VStack(alignment: .leading, spacing: 8) {
             header
             if let usage = entry.usage {
-                if let p = usage.primary { limitView("Primary", p); paceLine(for: p) }
-                if let s = usage.secondary { limitView("Secondary", s); paceLine(for: s) }
-                if let t = usage.tertiary { limitView("Tertiary", t); paceLine(for: t) }
-                gptReserveView(usage.extraRateWindows)
+                if hasVisibleLimits(usage) {
+                    if let p = usage.primary { limitView("Primary", p); paceLine(for: p) }
+                    if let s = usage.secondary { limitView("Secondary", s); paceLine(for: s) }
+                    if let t = usage.tertiary { limitView("Tertiary", t); paceLine(for: t) }
+                    gptReserveView(usage.extraRateWindows)
+                } else {
+                    Text("Limits not available")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 resetCreditsView(usage.codexResetCredits)
                 subscriptionMetadataView(usage)
                 footer(usage)
@@ -68,6 +74,13 @@ public struct ProviderRow: View {
     private var visibleAccount: String? {
         guard !hidePersonalInfo else { return nil }
         return entry.usage?.accountEmail ?? entry.account
+    }
+
+    private func hasVisibleLimits(_ usage: Usage) -> Bool {
+        usage.primary != nil
+            || usage.secondary != nil
+            || usage.tertiary != nil
+            || (usage.extraRateWindows ?? []).contains(where: Self.isGPTReserve)
     }
 
     private func limitView(_ label: String, _ limit: Limit) -> some View {
