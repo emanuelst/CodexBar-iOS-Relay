@@ -23,4 +23,3 @@ struct WindowFloatAccessor: NSViewRepresentable {
         }
     }
 }
-
