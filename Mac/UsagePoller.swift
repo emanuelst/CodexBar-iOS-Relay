@@ -218,7 +218,8 @@ final class UsagePoller: ObservableObject {
             extraRateWindows: extraRateWindows,
             codexResetCredits: credits,
             subscriptionRenewsAt: renewsAt,
-            subscriptionExpiresAt: expiresAt
+            subscriptionExpiresAt: expiresAt,
+            details: cliUsage.details
         )
         return UsageEntry(
             provider: cliCodex.provider,

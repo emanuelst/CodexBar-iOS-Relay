@@ -30,12 +30,13 @@ public struct Usage: Codable, Hashable {
     public let tertiary: Limit?
     /// Optional named quota lanes from CodexBar, such as GPT Reserve.
     public let extraRateWindows: [NamedLimit]?
+    public let details: [UsageDetailSection]?
     public let codexResetCredits: CodexResetCredits?
     /// Optional provider-supplied subscription metadata. CodexBar may omit these.
     public let subscriptionRenewsAt: String?
     public let subscriptionExpiresAt: String?
 
-    public init(accountEmail: String?, updatedAt: String?, loginMethod: String?, primary: Limit?, secondary: Limit?, tertiary: Limit?, extraRateWindows: [NamedLimit]? = nil, codexResetCredits: CodexResetCredits?, subscriptionRenewsAt: String? = nil, subscriptionExpiresAt: String? = nil) {
+    public init(accountEmail: String?, updatedAt: String?, loginMethod: String?, primary: Limit?, secondary: Limit?, tertiary: Limit?, extraRateWindows: [NamedLimit]? = nil, codexResetCredits: CodexResetCredits?, subscriptionRenewsAt: String? = nil, subscriptionExpiresAt: String? = nil, details: [UsageDetailSection]? = nil) {
         self.accountEmail = accountEmail
         self.updatedAt = updatedAt
         self.loginMethod = loginMethod
@@ -43,6 +44,7 @@ public struct Usage: Codable, Hashable {
         self.secondary = secondary
         self.tertiary = tertiary
         self.extraRateWindows = extraRateWindows
+        self.details = details
         self.codexResetCredits = codexResetCredits
         self.subscriptionRenewsAt = subscriptionRenewsAt
         self.subscriptionExpiresAt = subscriptionExpiresAt
@@ -129,4 +131,35 @@ public enum UsageJson {
     public static func encode(_ p: Payload) -> Data? {
         try? JSONEncoder().encode(p)
     }
+}
+
+/// Optional provider details shared by CLI and CodexBar's sync cache.
+public struct UsageDetailSection: Codable, Hashable {
+    public let title: String?
+    public let rows: [UsageDetailRow]
+}
+
+public struct UsageDetailRow: Codable, Hashable {
+    public let id: String?
+    public let label: String
+    public let value: String
+    public let secondaryValue: String?
+    public let usageValue: Double?
+    public let progress: UsageDetailProgress?
+
+    public var cloudCreditExpiry: String? {
+        guard let secondaryValue, secondaryValue.hasPrefix("Expires ") else { return nil }
+        let iso = String(secondaryValue.dropFirst("Expires ".count))
+        return ResetCountdown.date(from: iso) != nil ? iso : nil
+    }
+
+    public func cloudCreditExpired(at now: Date) -> Bool {
+        guard let iso = cloudCreditExpiry, let date = ResetCountdown.date(from: iso) else { return false }
+        return date <= now
+    }
+}
+
+public struct UsageDetailProgress: Codable, Hashable {
+    public let used: Double
+    public let total: Double
 }

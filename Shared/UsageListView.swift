@@ -29,6 +29,7 @@ public struct ProviderRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                cloudCreditsView(usage.details)
                 resetCreditsView(usage.codexResetCredits)
                 subscriptionMetadataView(usage)
                 footer(usage)
@@ -156,6 +157,34 @@ public struct ProviderRow: View {
         let id = window.id.lowercased()
         let title = window.title.lowercased()
         return id == "codex-base-model-inference" || id.contains("gpt-reserve") || title.contains("gpt reserve")
+    }
+
+    @ViewBuilder
+    private func cloudCreditsView(_ sections: [UsageDetailSection]?) -> some View {
+        if entry.provider == "claude",
+           let credit = sections?.flatMap(\.rows).first(where: { $0.id == "claude-cloud-credits" }) {
+            let expired = credit.cloudCreditExpired(at: now)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Label("Cloud credits", systemImage: "cloud").font(.caption.bold())
+                    Spacer()
+                    Text(expired ? "Expired" : credit.value)
+                        .font(.caption.monospacedDigit())
+                }
+                if !expired, let progress = credit.progress, progress.total > 0 {
+                    ProgressView(value: min(max(progress.total - progress.used, 0), progress.total), total: progress.total)
+                        .tint(.blue)
+                }
+                if let iso = credit.cloudCreditExpiry,
+                   let absolute = ResetCountdown.absolute(from: iso, now: now) {
+                    Text("\(expired ? "expired" : "expires") \(absolute)")
+                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                } else if let note = credit.secondaryValue {
+                    Text(note).font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 2)
+        }
     }
 
     @ViewBuilder

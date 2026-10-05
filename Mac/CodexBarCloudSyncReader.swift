@@ -29,6 +29,7 @@ struct CodexBarCloudSyncReader {
     }
 
     private struct SnapshotUsage: Decodable {
+        let details: [UsageDetailSection]?
         let primary: SnapshotLimit?
         let secondary: SnapshotLimit?
         let tertiary: SnapshotLimit?
@@ -170,7 +171,8 @@ struct CodexBarCloudSyncReader {
                 extraRateWindows: usage.extraRateWindows?.map(self.namedLimit),
                 codexResetCredits: usage.codexResetCredits.map(self.resetCredits),
                 subscriptionRenewsAt: usage.subscriptionRenewsAt.map(Self.iso8601.string),
-                subscriptionExpiresAt: usage.subscriptionExpiresAt.map(Self.iso8601.string)),
+                subscriptionExpiresAt: usage.subscriptionExpiresAt.map(Self.iso8601.string),
+                details: usage.details),
             error: nil)
     }
 
