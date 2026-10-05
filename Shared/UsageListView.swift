@@ -166,14 +166,13 @@ public struct ProviderRow: View {
             let expired = credit.cloudCreditExpired(at: now)
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Label("Cloud credits", systemImage: "cloud").font(.caption.bold())
+                    Label("Cloud credits", systemImage: "cloud")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Spacer()
                     Text(expired ? "Expired" : credit.value)
                         .font(.caption.monospacedDigit())
-                }
-                if !expired, let progress = credit.progress, progress.total > 0 {
-                    ProgressView(value: min(max(progress.total - progress.used, 0), progress.total), total: progress.total)
-                        .tint(.blue)
+                        .foregroundStyle(.secondary)
                 }
                 if let iso = credit.cloudCreditExpiry,
                    let absolute = ResetCountdown.absolute(from: iso, now: now) {
