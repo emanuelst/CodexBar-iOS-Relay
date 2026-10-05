@@ -19,6 +19,11 @@ public struct UsageEntry: Codable, Hashable {
     }
 
     public var hasUsage: Bool { usage != nil }
+
+    /// Snapshot changes update the existing row; an account change creates a new row.
+    public var rowIdentity: [String] {
+        [provider, account ?? "", usage?.accountEmail ?? "", usage?.loginMethod ?? ""]
+    }
 }
 
 public struct Usage: Codable, Hashable {
@@ -35,8 +40,10 @@ public struct Usage: Codable, Hashable {
     /// Optional provider-supplied subscription metadata. CodexBar may omit these.
     public let subscriptionRenewsAt: String?
     public let subscriptionExpiresAt: String?
+    public let subscriptionRenewsAtIsDateOnly: Bool?
+    public let subscriptionExpiresAtIsDateOnly: Bool?
 
-    public init(accountEmail: String?, updatedAt: String?, loginMethod: String?, primary: Limit?, secondary: Limit?, tertiary: Limit?, extraRateWindows: [NamedLimit]? = nil, codexResetCredits: CodexResetCredits?, subscriptionRenewsAt: String? = nil, subscriptionExpiresAt: String? = nil, details: [UsageDetailSection]? = nil) {
+    public init(accountEmail: String?, updatedAt: String?, loginMethod: String?, primary: Limit?, secondary: Limit?, tertiary: Limit?, extraRateWindows: [NamedLimit]? = nil, codexResetCredits: CodexResetCredits?, subscriptionRenewsAt: String? = nil, subscriptionExpiresAt: String? = nil, details: [UsageDetailSection]? = nil, subscriptionRenewsAtIsDateOnly: Bool? = nil, subscriptionExpiresAtIsDateOnly: Bool? = nil) {
         self.accountEmail = accountEmail
         self.updatedAt = updatedAt
         self.loginMethod = loginMethod
@@ -48,6 +55,22 @@ public struct Usage: Codable, Hashable {
         self.codexResetCredits = codexResetCredits
         self.subscriptionRenewsAt = subscriptionRenewsAt
         self.subscriptionExpiresAt = subscriptionExpiresAt
+        self.subscriptionRenewsAtIsDateOnly = subscriptionRenewsAtIsDateOnly
+        self.subscriptionExpiresAtIsDateOnly = subscriptionExpiresAtIsDateOnly
+    }
+    public var subscriptionRenewalValue: String? {
+        billingValue(subscriptionRenewsAt, dateOnly: subscriptionRenewsAtIsDateOnly)
+    }
+    public var subscriptionExpirationValue: String? {
+        billingValue(subscriptionExpiresAt, dateOnly: subscriptionExpiresAtIsDateOnly)
+    }
+    private func billingValue(_ value: String?, dateOnly: Bool?) -> String? {
+        guard dateOnly == true, let value, let date = ResetCountdown.date(from: value) else { return value }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 }
 
@@ -64,6 +87,37 @@ public struct NamedLimit: Codable, Hashable {
 public struct CodexResetCredits: Codable, Hashable {
     public let availableCount: Int?
     public let credits: [ResetCredit]?
+}
+
+/// Display-only inventory supplied by current upstream's generic detail row.
+/// The expiry is presentation text, not a machine-readable date or a redemption handle.
+public struct ClaudeSavedResetDetail: Equatable {
+    public let label: String
+    public let value: String
+    public let count: Int
+    public let expiryText: String?
+    public let isStale: Bool
+}
+
+extension Usage {
+    /// This threshold marks inventory as last reported; it does not erase source data.
+    /// A fresh wrapper timestamp never refreshes the underlying usage capture.
+    public static let savedResetMaximumAge: TimeInterval = 120
+
+    public func claudeSavedResetDetail(at now: Date) -> ClaudeSavedResetDetail? {
+        guard let updatedAt, let capture = ResetCountdown.date(from: updatedAt),
+              now.timeIntervalSince(capture) >= 0,
+              let rows = details?.flatMap(\.rows).filter({ $0.label == "Limit Reset Credits" }),
+              rows.count == 1, let row = rows.first
+        else { return nil }
+        let components = row.value.split(separator: " ", omittingEmptySubsequences: false)
+        guard components.count == 2, components[1] == "available",
+              let count = Int(components[0]), count > 0,
+              String(count) == components[0] else { return nil }
+        return ClaudeSavedResetDetail(label: row.label, value: row.value, count: count,
+                                      expiryText: row.secondaryValue,
+                                      isStale: now.timeIntervalSince(capture) >= Self.savedResetMaximumAge)
+    }
 }
 
 public struct ResetCredit: Codable, Hashable {

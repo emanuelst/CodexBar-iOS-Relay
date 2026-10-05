@@ -29,6 +29,7 @@ public struct ProviderRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                claudeSavedResetsView(usage)
                 cloudCreditsView(usage.details)
                 resetCreditsView(usage.codexResetCredits)
                 subscriptionMetadataView(usage)
@@ -160,6 +161,37 @@ public struct ProviderRow: View {
     }
 
     @ViewBuilder
+    private func claudeSavedResetsView(_ usage: Usage) -> some View {
+        if entry.provider == "claude", let reset = usage.claudeSavedResetDetail(at: now) {
+            VStack(alignment: .leading, spacing: 3) {
+                resetCreditsHeader(reset.isStale ? "\(reset.count) last reported" : reset.value)
+                HStack {
+                    if let expiry = reset.expiryText {
+                        // Upstream supplies localized text without an exact timestamp.
+                        // Preserve it verbatim; do not reconstruct a date or scope.
+                        Text(expiry).foregroundStyle(.tertiary)
+                    }
+                    Spacer()
+                    Link("Claude Usage", destination: URL(string: "https://claude.ai/settings/usage")!)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption2)
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func resetCreditsHeader(_ value: String) -> some View {
+        HStack {
+            Text("Reset credits")
+            Spacer()
+            Text(value).monospacedDigit()
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
     private func cloudCreditsView(_ sections: [UsageDetailSection]?) -> some View {
         if entry.provider == "claude",
            let credit = sections?.flatMap(\.rows).first(where: { $0.id == "claude-cloud-credits" }) {
@@ -192,12 +224,7 @@ public struct ProviderRow: View {
             let availableCredits = (credits.credits ?? []).filter { $0.status == "available" }
             let displayedCredits = availableCredits.isEmpty ? (credits.credits ?? []) : availableCredits
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.counterclockwise.circle").font(.caption2)
-                    Text("\(n) reset credit\(n == 1 ? "" : "s") available")
-                        .font(.caption.bold())
-                }
-                .foregroundStyle(.tint)
+                resetCreditsHeader("\(n) available")
                 ForEach(Array(displayedCredits.enumerated()), id: \.offset) { _, credit in
                     if let title = credit.title, !title.isEmpty {
                         Text(title)
@@ -217,20 +244,20 @@ public struct ProviderRow: View {
 
     @ViewBuilder
     private func subscriptionMetadataView(_ usage: Usage) -> some View {
-        if let iso = usage.subscriptionRenewsAt {
-            planDateLine("plan renews", iso)
+        if let iso = usage.subscriptionRenewalValue {
+            planDateLine("Plan renews", iso)
         }
-        if let iso = usage.subscriptionExpiresAt {
-            planDateLine("plan expires", iso)
+        if let iso = usage.subscriptionExpirationValue {
+            planDateLine("Plan expires", iso)
         }
     }
 
     @ViewBuilder
     private func planDateLine(_ label: String, _ iso: String) -> some View {
-        if let date = ResetCountdown.date(from: iso) {
-            Text("\(label) \(subscriptionDateTime(date)) · \(ResetCountdown.countdown(from: iso, now: now) ?? "now")")
+        if let rendered = ResetCountdown.subscriptionDate(iso, now: now) {
+            Text("\(label) \(rendered)")
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(.tint)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -277,13 +304,13 @@ public struct UsageListView: View {
                 let usable = payload.usage.filter { $0.hasUsage }
                 let errored = payload.usage.filter { !$0.hasUsage }
                 Section {
-                    ForEach(usable, id: \.self) { ProviderRow(entry: $0, showUsed: payload.showUsed, showAbsolute: payload.resetTimesShowAbsolute, hidePersonalInfo: hidePersonalInfo, now: context.date) }
+                    ForEach(usable, id: \.rowIdentity) { ProviderRow(entry: $0, showUsed: payload.showUsed, showAbsolute: payload.resetTimesShowAbsolute, hidePersonalInfo: hidePersonalInfo, now: context.date) }
                 } header: {
                     Text("\(usable.count) providers")
                 }
                 if !errored.isEmpty {
                     Section {
-                        ForEach(errored, id: \.self) { ProviderRow(entry: $0, showUsed: payload.showUsed, showAbsolute: payload.resetTimesShowAbsolute, hidePersonalInfo: hidePersonalInfo, now: context.date) }
+                        ForEach(errored, id: \.rowIdentity) { ProviderRow(entry: $0, showUsed: payload.showUsed, showAbsolute: payload.resetTimesShowAbsolute, hidePersonalInfo: hidePersonalInfo, now: context.date) }
                     } header: {
                         Text("\(errored.count) unavailable")
                     }

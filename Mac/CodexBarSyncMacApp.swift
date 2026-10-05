@@ -35,34 +35,15 @@ struct CodexBarSyncMacApp: App {
             MacRootView().environmentObject(sync)
         }
         .defaultSize(width: 380, height: 560)
-    }
-}
-
-/// Sets the hosting NSWindow to floating while `floating` is true.
-/// ponytail: NSViewRepresentable to grab the window — no WindowGroup window-level API on macOS 14.
-private struct WindowFloatAccessor: NSViewRepresentable {
-    @Binding var floating: Bool
-    func makeNSView(context: Context) -> NSView {
-        let v = NSView()
-        DispatchQueue.main.async { apply(v) }
-        return v
-    }
-    func updateNSView(_ nsView: NSView, context: Context) { apply(nsView) }
-    private func apply(_ v: NSView) {
-        guard let w = v.window else { return }
-        if floating {
-            w.level = .floating
-            w.collectionBehavior = []
-            w.isMovableByWindowBackground = true
-        } else {
-            w.level = .normal
-            w.collectionBehavior = []
-            w.isMovableByWindowBackground = false
+        Window("Plan Usage", id: "plan-usage") {
+            PlanUsageWindow()
         }
+        .defaultSize(width: 680, height: 720)
     }
 }
 
 private struct MacRootView: View {
+    @Environment(\.openWindow) private var openWindow
     @EnvironmentObject var sync: SyncController
     @AppStorage("floatingMode") private var floatingMode = false
     @AppStorage("hidePersonalInfo") private var hidePersonalInfo = false
@@ -126,6 +107,9 @@ private struct MacRootView: View {
                     Text(sync.lastError ?? "running…").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button { openWindow(id: "plan-usage") } label: {
+                    Image(systemName: "chart.xyaxis.line")
+                }.buttonStyle(.borderless).help("Open Plan Usage")
                 Button {
                     floatingMode.toggle()
                 } label: {

@@ -11,6 +11,8 @@ struct CodexBarCloudSyncReader {
     private static let maximumSnapshotAge: TimeInterval = 5 * 60
 
     private struct EngineState: Decodable {
+        let generatedAt: Date?
+        let selectedOwnerID: String?
         let fleetDevices: [String: Device]?
         let fleetSnapshots: [String: Snapshot]?
     }
@@ -39,6 +41,8 @@ struct CodexBarCloudSyncReader {
         let codexResetCredits: SnapshotResetCredits?
         let subscriptionRenewsAt: Date?
         let subscriptionExpiresAt: Date?
+        let subscriptionRenewsAtIsDateOnly: Bool?
+        let subscriptionExpiresAtIsDateOnly: Bool?
         let updatedAt: Date
     }
 
@@ -80,10 +84,14 @@ struct CodexBarCloudSyncReader {
     }
 
     private let fileURL: URL
+    private let devFileURL: URL?
     private let decoder: JSONDecoder
 
-    init(fileURL: URL = Self.defaultFileURL()) {
+    init(fileURL: URL = Self.defaultFileURL(), devFileURL: URL? = nil) {
         self.fileURL = fileURL
+        self.devFileURL = devFileURL ?? (fileURL == Self.defaultFileURL()
+            ? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+                "Library/Application Support/com.steipete.codexbar.debug/relay/selected-usage.json") : nil)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
@@ -103,24 +111,34 @@ struct CodexBarCloudSyncReader {
     }
 
     func readPayload() -> Payload? {
-        guard let data = try? Data(contentsOf: self.fileURL) else {
-            return nil
-        }
         let state: EngineState
-        do {
-            state = try self.decoder.decode(EngineState.self, from: data)
-        } catch {
-            FileHandle.standardError.write(
-                Data(("[codexbarsync] CodexBar iCloud snapshot decode failed: \(error)\n").utf8))
-            return nil
+        if let data = try? Data(contentsOf: self.fileURL),
+           let decoded = try? self.decoder.decode(EngineState.self, from: data) {
+            state = decoded
+        } else {
+            state = EngineState(generatedAt: nil, selectedOwnerID: nil, fleetDevices: nil, fleetSnapshots: [:])
         }
-        guard let snapshots = state.fleetSnapshots, !snapshots.isEmpty else {
-            return nil
-        }
+        let snapshots = state.fleetSnapshots ?? [:]
 
         let now = Date()
-        let freshSnapshots = snapshots.values.filter {
-            $0.schemaVersion <= 1 && now.timeIntervalSince($0.fetchedAt) <= Self.maximumSnapshotAge
+        var freshSnapshots = snapshots.values.filter {
+            $0.schemaVersion <= 1 && (0...Self.maximumSnapshotAge).contains(now.timeIntervalSince($0.fetchedAt))
+        }
+        // Dev supplies its own selected complete Claude snapshot. Never copy its dates
+        // onto a signed producer's account, quota windows, or stale retained snapshot.
+        var devSelected: Snapshot?
+        if let devFileURL, let data = try? Data(contentsOf: devFileURL),
+           let dev = try? decoder.decode(EngineState.self, from: data),
+           let generatedAt = dev.generatedAt,
+           (0...Self.maximumSnapshotAge).contains(now.timeIntervalSince(generatedAt)) {
+            if let selected = dev.fleetSnapshots?["selected-claude"],
+               selected.provider == "claude", selected.schemaVersion <= 1,
+               dev.selectedOwnerID?.hasPrefix("claude-owner-v1:") == true,
+               (0...Self.maximumSnapshotAge).contains(now.timeIntervalSince(selected.usage.updatedAt)) {
+                freshSnapshots.removeAll { $0.provider == "claude" }
+                freshSnapshots.append(selected)
+                devSelected = selected
+            }
         }
         guard !freshSnapshots.isEmpty else {
             let latest = snapshots.values.map(\.fetchedAt).max() ?? now
@@ -138,7 +156,7 @@ struct CodexBarCloudSyncReader {
             .compactMap { _, providerSnapshots in providerSnapshots.max { $0.fetchedAt < $1.fetchedAt } }
             .sorted { $0.provider < $1.provider }
             .map { snapshot in
-                self.entry(for: snapshot)
+                self.entry(for: snapshot, source: snapshot.provider == "claude" && devSelected != nil ? "codexbar-dev" : "codexbar-icloud")
             }
 
         guard !entries.isEmpty else { return nil }
@@ -154,8 +172,7 @@ struct CodexBarCloudSyncReader {
             usage: entries)
     }
 
-    private func entry(for snapshot: Snapshot) -> UsageEntry {
-        let source = "codexbar-icloud"
+    private func entry(for snapshot: Snapshot, source: String) -> UsageEntry {
         let usage = snapshot.usage
         return UsageEntry(
             provider: snapshot.provider,
@@ -172,7 +189,9 @@ struct CodexBarCloudSyncReader {
                 codexResetCredits: usage.codexResetCredits.map(self.resetCredits),
                 subscriptionRenewsAt: usage.subscriptionRenewsAt.map(Self.iso8601.string),
                 subscriptionExpiresAt: usage.subscriptionExpiresAt.map(Self.iso8601.string),
-                details: usage.details),
+                details: usage.details,
+                subscriptionRenewsAtIsDateOnly: usage.subscriptionRenewsAtIsDateOnly,
+                subscriptionExpiresAtIsDateOnly: usage.subscriptionExpiresAtIsDateOnly),
             error: nil)
     }
 

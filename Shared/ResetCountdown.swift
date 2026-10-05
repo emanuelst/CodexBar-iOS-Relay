@@ -75,6 +75,21 @@ public enum ResetCountdown {
         return "\(dateFormatter.string(from: date)) · \(timeFormatter.string(from: date)) \(localTimeZoneOffsetLabel(for: offset))"
     }
 
+    /// Billing dates may be calendar dates. Preserve that precision without a timezone conversion.
+    public static func subscriptionDate(_ value: String, now: Date = .init()) -> String? {
+        if value.count == 10 {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "yyyy-MM-dd"
+            formatter.isLenient = false
+            guard let date = formatter.date(from: value), formatter.string(from: date) == value else { return nil }
+            formatter.dateFormat = "EEE, MMM d, yyyy"
+            return formatter.string(from: date)
+        }
+        return absolute(from: value, now: now)
+    }
+
     /// Full reset line honoring the style. Prefers `resetsAt`; falls back to the
     /// provider's `resetDescription` (e.g. "0 / 5000 messages") when no ISO time.
     public static func resetLine(for limit: Limit, showAbsolute: Bool, now: Date = .init()) -> String? {
