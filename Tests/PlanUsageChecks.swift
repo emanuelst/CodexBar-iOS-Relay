@@ -13,6 +13,47 @@ import Foundation
         let g = graph([entry(1200, 10), entry(600, 20)])!
         precondition(g.samples.count == 2 && g.last.date == now.addingTimeInterval(-600))
         precondition(g.last.remaining == 80 && g.progress(g.start) == 0 && g.progress(g.reset) == 100)
+        let shortAxis = PlanUsageTimeAxis(start: now.addingTimeInterval(-5 * 3600), end: now)
+        precondition(shortAxis.labelDates == shortAxis.hourBoundaries && shortAxis.labelDates.count > 5 && shortAxis.dayBoundaries.isEmpty)
+        precondition(shortAxis.label(for: shortAxis.labelDates[0]).contains(":"))
+
+        let vienna = TimeZone(identifier: "Europe/Vienna")!
+        let fallBackStart = ResetCountdown.date(from: "2026-10-23T22:00:00Z")!
+        let fallBackEnd = ResetCountdown.date(from: "2026-10-26T23:00:00Z")!
+        let calendarAxis = PlanUsageTimeAxis(start: fallBackStart, end: fallBackEnd, timeZone: vienna)
+        precondition(calendarAxis.dayBoundaries.count == 4)
+        precondition(calendarAxis.dayBoundaries[2].timeIntervalSince(calendarAxis.dayBoundaries[1]) == 25 * 3600)
+        precondition(calendarAxis.labelDates.count == 4)
+        precondition(calendarAxis.labelDates == calendarAxis.dayBoundaries)
+        let focusStart = fallBackStart.addingTimeInterval(24 * 3600)
+        let focusEnd = focusStart.addingTimeInterval(8 * 3600)
+        let focused = PlanUsageFocusAxis(start: fallBackStart, end: fallBackEnd, focusStart: focusStart, focusEnd: focusEnd)
+        precondition(focused.breakDates == [focusStart, focusEnd])
+        precondition(abs(focused.position(focusEnd) - focused.position(focusStart) - 0.64) < 0.000001)
+        var previous = -Double.infinity
+        for hour in 0...Int(fallBackEnd.timeIntervalSince(fallBackStart) / 3600) {
+            let date = fallBackStart.addingTimeInterval(Double(hour) * 3600)
+            let position = focused.position(date)
+            precondition(position > previous)
+            precondition(abs(focused.date(at: position).timeIntervalSince(date)) < 0.001)
+            previous = position
+        }
+        let vertices = focused.vertices([.init(date: fallBackStart, remaining: 100), .init(date: fallBackEnd, remaining: 0)])
+        precondition(vertices.map(\.date) == [fallBackStart, focusStart, focusEnd, fallBackEnd])
+        for point in vertices {
+            let expected = 100 * (1 - point.date.timeIntervalSince(fallBackStart) / fallBackEnd.timeIntervalSince(fallBackStart))
+            precondition(abs(point.remaining - expected) < 0.000001)
+        }
+        let shortFocus = PlanUsageFocusAxis(start: now, end: reset, focusStart: now, focusEnd: reset)
+        precondition(shortFocus.breakDates.isEmpty && shortFocus.position(now) == 0 && shortFocus.position(reset) == 1)
+        precondition(calendarAxis.label(for: calendarAxis.labelDates[0], timeZone: vienna).contains("Sat"))
+        precondition(calendarAxis.label(for: calendarAxis.labelDates[1], timeZone: vienna).contains("Sun"))
+        precondition(calendarAxis.label(for: calendarAxis.labelDates[2], timeZone: vienna).contains("Mon"))
+        precondition(calendarAxis.label(for: calendarAxis.labelDates[3], timeZone: vienna).contains("Tue"))
+        let mondayReset = ResetCountdown.date(from: "2026-10-12T08:59:00Z")!
+        let extendedAxis = PlanUsageTimeAxis(start: ResetCountdown.date(from: "2026-10-02T22:00:00Z")!, end: mondayReset, timeZone: vienna)
+        precondition(extendedAxis.plotEnd > mondayReset)
+        precondition(extendedAxis.labelDates.contains { extendedAxis.label(for: $0, timeZone: vienna).contains("Mon") })
         precondition(graph([]) == nil && graph([entry(600, .nan)]) == nil)
         precondition(graph([entry(600, 0, now)]) == nil)
         precondition(graph([entry(-600, 0)]) == nil)
@@ -51,6 +92,6 @@ import Foundation
         try write("one", version: 2)
         precondition(reader.read(provider: "codex").isEmpty)
         precondition(reader.read(provider: "unsupported").isEmpty)
-        print("Plan Usage checks passed: recorded endpoints, normalized progress, expired/future/missing windows, reset segments, duplicate captures, account isolation, date precision")
+        print("Plan Usage checks passed: actual-time ticks and DST day boundaries, recorded endpoints, normalized progress, expired/future/missing windows, reset segments, duplicate captures, account isolation, date precision")
     }
 }

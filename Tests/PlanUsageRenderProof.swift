@@ -28,10 +28,12 @@ import SwiftUI
             for (name, provider, normalized, lane) in [
                 ("codex", "Codex", false, "session"), ("claude", "Claude", false, "session"),
                 ("combined", "Combined", false, "session"), ("normalized", "Combined", true, "session"),
-                ("weekly", "Combined", false, "weekly"), ("weekly-normalized", "Combined", true, "weekly")
+                ("weekly", "Combined", false, "weekly"), ("weekly-normalized", "Combined", true, "weekly"),
+                ("both", "Combined", false, "both"), ("both-small", "Combined", false, "both"),
+                ("both-normalized", "Combined", true, "both")
             ] {
                 let view = NSHostingView(rootView: PlanUsageWindow(fixture: fixture, provider: provider, normalized: normalized, lane: lane))
-                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 880), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: name == "both-small" ? 580 : 680, height: 880), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
                 window.title = "Plan Usage"
                 window.appearance = NSAppearance(named: appearance)
                 window.contentView = view

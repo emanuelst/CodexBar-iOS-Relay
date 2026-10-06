@@ -13,7 +13,20 @@ public struct UsagePace: Sendable {
     public let expectedUsedPercent: Double
     public let actualUsedPercent: Double
     public let etaSeconds: TimeInterval?
+    /// Unclipped depletion ETA at the same average rate, including estimates after reset.
+    public let depletionSeconds: TimeInterval?
     public let willLastToReset: Bool
+    public let usageRatePercentPerSecond: Double?
+
+    /// Project the same constant burn rate used for the "Runs out" estimate.
+    public func remainingPercent(at date: Date, observedAt: Date) -> Double? {
+        guard date >= observedAt else { return nil }
+        guard let rate = self.usageRatePercentPerSecond else {
+            return self.actualUsedPercent == 0 ? 100 : nil
+        }
+        let used = self.actualUsedPercent + rate * date.timeIntervalSince(observedAt)
+        return min(100, max(0, 100 - used))
+    }
 
     /// Compute pace for any rate window. (Named `compute`, not `weekly` — the
     /// formula is window-agnostic; works for 5h primary or 7d secondary.)
@@ -40,13 +53,17 @@ public struct UsagePace: Sendable {
         let stage = Self.stage(for: delta)
 
         var etaSeconds: TimeInterval?
+        var depletionSeconds: TimeInterval?
         var willLastToReset = false
+        var usageRatePercentPerSecond: Double?
 
         if elapsed > 0, actual > 0 {
             let rate = actual / elapsed
+            usageRatePercentPerSecond = rate
             if rate > 0 {
                 let remaining = max(0, 100 - actual)
                 let candidate = remaining / rate
+                depletionSeconds = candidate
                 if candidate >= timeUntilReset {
                     willLastToReset = true
                 } else {
@@ -63,7 +80,9 @@ public struct UsagePace: Sendable {
             expectedUsedPercent: expected,
             actualUsedPercent: actual,
             etaSeconds: etaSeconds,
-            willLastToReset: willLastToReset)
+            depletionSeconds: depletionSeconds,
+            willLastToReset: willLastToReset,
+            usageRatePercentPerSecond: usageRatePercentPerSecond)
     }
 
     private static func stage(for delta: Double) -> Stage {
@@ -82,7 +101,7 @@ public struct UsagePace: Sendable {
 public enum UsagePaceText {
     /// Minimum expected usage before pace is shown (avoids early-window noise).
     /// Matches CodexBar's `minimumExpectedPercent`.
-    private static let minimumExpectedPercent: Double = 3
+    static let minimumExpectedPercent: Double = 3
 
     /// Full "Pace: … · …" line for a single rate window, or nil if pace isn't
     /// applicable. Per-window (primary/secondary/tertiary) — the math is identical
@@ -92,24 +111,28 @@ public enum UsagePaceText {
         for limit: Limit,
         now: Date = .init()
     ) -> String? {
-        guard let used = limit.usedPercent else { return nil }
-        let remaining = max(0, 100 - used)
-        guard remaining > 0 else { return nil }
-        guard let resetsAt = limit.resetsAt else { return nil }
-
-        guard let pace = UsagePace.compute(
-            usedPercent: used,
-            windowMinutes: limit.windowMinutes,
-            resetsAt: resetsAt,
-            now: now
-        ) else { return nil }
-        guard pace.expectedUsedPercent >= minimumExpectedPercent else { return nil }
+        guard let used = limit.usedPercent,
+              let resetsAt = limit.resetsAt,
+              let pace = visiblePace(usedPercent: used, windowMinutes: limit.windowMinutes, resetsAt: resetsAt, now: now) else { return nil }
 
         let left = leftLabel(for: pace)
         if let right = rightLabel(for: pace, now: now) {
             return "Pace: \(left) · \(right)"
         }
         return "Pace: \(left)"
+    }
+
+    /// Shared by the summary and chart projection so both use the same eligibility rules and math.
+    public static func visiblePace(
+        usedPercent: Double,
+        windowMinutes: Int?,
+        resetsAt: String,
+        now: Date = .init()
+    ) -> UsagePace? {
+        guard max(0, 100 - usedPercent) > 0,
+              let pace = UsagePace.compute(usedPercent: usedPercent, windowMinutes: windowMinutes, resetsAt: resetsAt, now: now),
+              pace.expectedUsedPercent >= minimumExpectedPercent else { return nil }
+        return pace
     }
 
     private static func leftLabel(for pace: UsagePace) -> String {

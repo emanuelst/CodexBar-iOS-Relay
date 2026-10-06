@@ -17,6 +17,19 @@ import Foundation
             if legacy { fields["claudeResetCredits"] = ["availability": "available", "credits": [["label": "Full reset", "count": 99, "expiresAt": "2030-01-01", "clears": ["seven_day"]]]] }
             return try JSONDecoder().decode(Usage.self, from: JSONSerialization.data(withJSONObject: fields))
         }
+        let vienna = TimeZone(identifier: "Europe/Vienna")!
+        let estimated = ResetCountdown.estimatedSavedResetExpiry(expiry, capturedAt: now, timeZone: vienna)
+        require(estimated == ResetCountdown.date(from: "2026-10-22T16:00:00Z"))
+        require(ResetCountdown.estimatedSavedResetExpiry("Expires Oct 22 at 6:00 PM", capturedAt: now, timeZone: vienna) == estimated)
+        require(ResetCountdown.estimatedSavedResetExpiry("Expires Feb 30 at 18:00", capturedAt: now, timeZone: vienna) == nil)
+        require(ResetCountdown.estimatedSavedResetExpiry("Expires Oct 22 at 25:00", capturedAt: now, timeZone: vienna) == nil)
+        require(ResetCountdown.estimatedSavedResetExpiry("Expires tomorrow", capturedAt: now, timeZone: vienna) == nil)
+        let decemberCapture = ResetCountdown.date(from: "2026-12-31T12:00:00Z")!
+        require(ResetCountdown.estimatedSavedResetExpiry("Expires Jan 2 at 18:00", capturedAt: decemberCapture, timeZone: vienna)
+                == ResetCountdown.date(from: "2027-01-02T17:00:00Z"))
+        let later = ResetCountdown.date(from: "2027-01-01T12:00:00Z")!
+        require(ResetCountdown.estimatedSavedResetExpiryLine(expiry, capturedAt: now, now: later)?.contains("2026") == true)
+
         let fresh = try usage()
         let detail = fresh.claudeSavedResetDetail(at: now)!
         require(detail.count == 1 && detail.value == "1 available" && detail.expiryText == expiry)

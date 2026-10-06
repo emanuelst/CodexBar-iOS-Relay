@@ -75,6 +75,52 @@ public enum ResetCountdown {
         return "\(dateFormatter.string(from: date)) · \(timeFormatter.string(from: date)) \(localTimeZoneOffsetLabel(for: offset))"
     }
 
+    /// Best-effort interpretation of upstream display text in the viewing device's timezone.
+    /// Anchor the inferred year to the original capture so an old offer cannot roll forward on redraw.
+    public static func estimatedSavedResetExpiry(_ text: String, capturedAt: Date,
+                                                 timeZone: TimeZone = .current) -> Date? {
+        let pattern = #"^Expires ([A-Za-z]{3}) ([0-9]{1,2}) at ([0-9]{1,2}):([0-9]{2})(?: (AM|PM))?$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
+        func part(_ index: Int) -> String? {
+            guard let range = Range(match.range(at: index), in: text) else { return nil }
+            return String(text[range])
+        }
+        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        guard let monthText = part(1), let index = months.firstIndex(of: monthText),
+              let dayText = part(2), let day = Int(dayText), (1...31).contains(day),
+              let hourText = part(3), var hour = Int(hourText),
+              let minuteText = part(4), let minute = Int(minuteText), (0...59).contains(minute) else { return nil }
+        if let period = part(5) {
+            guard (1...12).contains(hour) else { return nil }
+            hour = hour % 12 + (period == "PM" ? 12 : 0)
+        } else if !(0...23).contains(hour) { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let capture = calendar.dateComponents([.year, .month, .day], from: capturedAt)
+        guard var year = capture.year, let captureMonth = capture.month, let captureDay = capture.day else { return nil }
+        let month = index + 1
+        if month < captureMonth || (month == captureMonth && day < captureDay) { year += 1 }
+        let components = DateComponents(year: year, month: month, day: day, hour: hour, minute: minute)
+        guard let date = calendar.date(from: components),
+              calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date) == components else { return nil }
+        return date
+    }
+
+    public static func estimatedSavedResetExpiryLine(_ text: String, capturedAt: Date,
+                                                     now: Date = .init()) -> String? {
+        guard let date = estimatedSavedResetExpiry(text, capturedAt: capturedAt) else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = Calendar.current.isDate(date, equalTo: now, toGranularity: .year)
+            ? "EEE, MMM d · HH:mm" : "EEE, MMM d, yyyy · HH:mm"
+        let iso = ISO8601DateFormatter().string(from: date)
+        guard let countdown = countdown(from: iso, now: now) else { return nil }
+        let estimate = countdown == "now" ? "around now" : countdown.replacingOccurrences(of: "in ", with: "in ~")
+        return "expires \(formatter.string(from: date)) · \(estimate)"
+    }
+
     /// Billing dates may be calendar dates. Preserve that precision without a timezone conversion.
     public static func subscriptionDate(_ value: String, now: Date = .init()) -> String? {
         if value.count == 10 {

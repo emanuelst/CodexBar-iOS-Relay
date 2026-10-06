@@ -4,7 +4,6 @@ Open the separate Plan Usage window from the chart button in Relay's existing st
 
 ## Data and ownership
 
-This view reads CodexBar's existing version-1 JSON history under `~/Library/Application Support/com.steipete.codexbar/history/`. Each file contains `preferredAccountKey`, `accounts`, `unscoped` and series with `name`, `windowMinutes`, and `entries` (`capturedAt`, `usedPercent`, `resetsAt`). Dates are ISO-8601. The reader uses only the explicitly preferred **saved** account bucket and never merges owners, chooses another account by recency, adopts unscoped entries or reconstructs history from Relay's current snapshot. Missing or ambiguous stored ownership is unavailable. Changes to the preferred key replace the window's histories atomically on the next read; missing files/buckets clear them.
 
 CodexBar's in-process account resolver additionally has live credential/settings authority that is not exported in history JSON. Relay deliberately follows the persisted selection, rather than recreating that resolver from credentials. An account switch before CodexBar persists a new selection is not independently observable by Relay; the footer says “selected saved account.” This is a limitation of the current upstream history interface. No historical account migration is performed by Relay.
 
@@ -20,7 +19,9 @@ Existing `subscriptionRenewsAt` / `subscriptionExpiresAt` flow through Relay. Ne
 
 Final macOS Debug and iOS Simulator builds pass. Graph/account/date-precision checks and the existing cloud-credit/reset decoder checks pass. Native recorded-history renders were inspected in light and dark appearance. Saved screenshots: [Codex](plan-usage-screenshots/codex-light.png), [Claude](plan-usage-screenshots/claude-light.png), [Combined](plan-usage-screenshots/combined-light.png), [Normalized](plan-usage-screenshots/normalized-light.png), [Weekly dark](plan-usage-screenshots/weekly-dark.png). The earlier typed Claude saved-reset work was subsequently consolidated into the upstream detail-row adapter; see [saved-reset notes](claude-saved-resets.md). Billing/date precision and graph checks continue to pass.
 
-Combined now uses one actual-time plot with separate Codex/Claude lines and dashed guides, a common 0–100 remaining-percentage scale, provider legend and each real reset time. Normalized comparison remains optional; no allowances are summed or averaged. Recorded native proofs were refreshed after this change.
+Combined uses one plot with separate Codex/Claude lines and a common 0–100 remaining-percentage scale. `Both` overlays session and weekly limits on one timeline. The hours around the active sessions take most of the width; earlier and later days are compressed. `//` marks each change of scale and no time is omitted. Lines have display-only interpolated vertices at those joins so recorded values and forecast timestamps remain correct. Hour ticks use the displayed timezone; compressed sections use calendar dates. Hover cards use screen distance, list nearby events together and retain each exact timestamp. Normalized comparison continues to use elapsed progress without calendar ticks or scale changes.
+
+Each quota has one forecast entry containing its line/endpoint key and complete projected exhaustion timestamp. It identifies continuation beyond reset as hypothetical. There is no repeated run-out-time row in the provider details. Forecast calculations still use the shared pace implementation; widening the hours changes their visual slope across scale joins, not their calculation. No allowances are summed or averaged.
 
 ### Claude dates from the local Dev build
 

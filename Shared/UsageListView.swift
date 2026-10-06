@@ -165,17 +165,22 @@ public struct ProviderRow: View {
         if entry.provider == "claude", let reset = usage.claudeSavedResetDetail(at: now) {
             VStack(alignment: .leading, spacing: 3) {
                 resetCreditsHeader(reset.isStale ? "\(reset.count) last reported" : reset.value)
-                HStack {
-                    if let expiry = reset.expiryText {
-                        // Upstream supplies localized text without an exact timestamp.
-                        // Preserve it verbatim; do not reconstruct a date or scope.
-                        Text(expiry).foregroundStyle(.tertiary)
+                Link("Saved reset", destination: URL(string: "https://claude.ai/settings/usage")!)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .help("Open Claude's Usage page to see the reset type and options.")
+                if let expiry = reset.expiryText {
+                    let estimated = usage.updatedAt.flatMap(ResetCountdown.date(from:)).flatMap {
+                        ResetCountdown.estimatedSavedResetExpiryLine(expiry, capturedAt: $0, now: now)
                     }
-                    Spacer()
-                    Link("Claude Usage", destination: URL(string: "https://claude.ai/settings/usage")!)
-                        .foregroundStyle(.secondary)
+                    let text = estimated ?? (expiry.hasPrefix("Expires ")
+                        ? "expires " + expiry.dropFirst("Expires ".count)
+                        : expiry)
+                    Text(text)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .help(estimated == nil ? expiry : "Approximate: year inferred from the saved snapshot; time interpreted in this device's timezone.")
                 }
-                .font(.caption2)
             }
             .padding(.top, 2)
         }
@@ -301,8 +306,12 @@ public struct UsageListView: View {
             List {
             if let payload {
                 headerSection(payload, now: context.date)
-                let usable = payload.usage.filter { $0.hasUsage }
-                let errored = payload.usage.filter { !$0.hasUsage }
+                let ordered = payload.usage.sorted {
+                    ProviderDisplayName.name(for: $0.provider).lowercased()
+                        < ProviderDisplayName.name(for: $1.provider).lowercased()
+                }
+                let usable = ordered.filter { $0.hasUsage }
+                let errored = ordered.filter { !$0.hasUsage }
                 Section {
                     ForEach(usable, id: \.rowIdentity) { ProviderRow(entry: $0, showUsed: payload.showUsed, showAbsolute: payload.resetTimesShowAbsolute, hidePersonalInfo: hidePersonalInfo, now: context.date) }
                 } header: {
