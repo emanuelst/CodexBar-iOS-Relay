@@ -34,7 +34,12 @@ public enum ResetCountdown {
     /// "in 2h 27m", "in 5d 3h", "in 30m", "now". Matches CodexBar (ceil to minutes).
     public static func countdown(from iso: String, now: Date = .init()) -> String? {
         guard let d = date(from: iso) else { return nil }
-        let seconds = max(0, d.timeIntervalSince(now))
+        return countdown(to: d, now: now)
+    }
+
+    /// Returns a compact countdown for an already decoded reset date.
+    public static func countdown(to date: Date, now: Date = .init()) -> String {
+        let seconds = max(0, date.timeIntervalSince(now))
         if seconds < 1 { return "now" }
         let totalMinutes = max(1, Int(ceil(seconds / 60.0)))
         let days = totalMinutes / (24 * 60)

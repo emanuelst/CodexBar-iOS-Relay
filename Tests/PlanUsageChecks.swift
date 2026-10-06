@@ -92,6 +92,17 @@ import Foundation
         try write("one", version: 2)
         precondition(reader.read(provider: "codex").isEmpty)
         precondition(reader.read(provider: "unsupported").isEmpty)
-        print("Plan Usage checks passed: actual-time ticks and DST day boundaries, recorded endpoints, normalized progress, expired/future/missing windows, reset segments, duplicate captures, account isolation, date precision")
+        // Previous finished window: display context only, found by its own reset boundary.
+        let oldReset = now.addingTimeInterval(-600)
+        let history = PlanUsageSeries(name: "session", windowMinutes: 300, entries: [
+            PlanUsageEntry(capturedAt: oldReset.addingTimeInterval(-7200), usedPercent: 40, resetsAt: oldReset),
+            PlanUsageEntry(capturedAt: oldReset.addingTimeInterval(-60), usedPercent: 90, resetsAt: oldReset),
+            PlanUsageEntry(capturedAt: now.addingTimeInterval(-60), usedPercent: 0, resetsAt: now.addingTimeInterval(300 * 60 - 600))])
+        let fresh = PlanUsageGraph(series: history, now: now)!
+        precondition(fresh.samples.count == 1, "current window ignores the finished one")
+        let finished = PlanUsageGraph.previous(series: history, before: fresh)!
+        precondition(finished.reset == oldReset && finished.samples.map(\.remaining) == [60, 10])
+        precondition(PlanUsageGraph.previous(series: PlanUsageSeries(name: "session", windowMinutes: 300, entries: [history.entries[2]]), before: fresh) == nil)
+        print("Plan Usage checks passed: actual-time ticks and DST day boundaries, recorded endpoints, normalized progress, expired/future/missing windows, reset segments, duplicate captures, account isolation, date precision, previous window")
     }
 }

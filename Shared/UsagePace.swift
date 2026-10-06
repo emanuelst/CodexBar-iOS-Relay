@@ -150,8 +150,6 @@ public enum UsagePaceText {
         let date = now.addingTimeInterval(etaSeconds)
         let countdown = ResetCountdown.countdown(from: ISO8601DateFormatter().string(from: date), now: now) ?? "now"
         if countdown == "now" { return "Runs out now" }
-        // countdown is "in 2h 30m" — strip "in " prefix to match CodexBar's durationText
-        let dur = countdown.hasPrefix("in ") ? String(countdown.dropFirst(3)) : countdown
-        return "Runs out in \(dur)"
+        return "Runs out \(ResetCountdown.absoluteDateTime(date, now: now)) · \(countdown)"
     }
 }

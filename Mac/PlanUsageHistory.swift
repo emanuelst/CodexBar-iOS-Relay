@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Read-only adapter for CodexBar's version-1 PlanUtilizationHistoryStore.
@@ -184,6 +185,11 @@ struct PlanUsageFocusAxis {
         return focusStart.addingTimeInterval((position - leadingWidth) / (1 - leadingWidth - trailingWidth) * focusEnd.timeIntervalSince(focusStart))
     }
 
+    func isFocused(_ position: Double) -> Bool {
+        let date = date(at: position)
+        return date >= focusStart.addingTimeInterval(-1) && date <= focusEnd.addingTimeInterval(1)
+    }
+
     func vertices(_ samples: [PlanUsageGraph.Sample]) -> [PlanUsageGraph.Sample] {
         guard samples.count > 1 else { return samples }
         var result = [samples[0]]
@@ -211,31 +217,60 @@ struct PlanUsageGraph: Equatable {
     var last: Sample { samples[samples.count - 1] }
 
     init?(series: PlanUsageSeries, now: Date) {
-        let entries = series.entries.sorted {
-            if $0.capturedAt != $1.capturedAt { return $0.capturedAt < $1.capturedAt }
-            if $0.usedPercent != $1.usedPercent { return $0.usedPercent < $1.usedPercent }
-            return ($0.resetsAt ?? .distantPast) < ($1.resetsAt ?? .distantPast)
-        }
+        let entries = Self.sorted(series.entries)
         guard series.windowMinutes > 0, let latest = entries.last,
               latest.capturedAt <= now, latest.usedPercent.isFinite,
               let reset = latest.resetsAt, reset > now else { return nil }
         let start = reset.addingTimeInterval(-Double(series.windowMinutes) * 60)
         guard start <= latest.capturedAt else { return nil }
+        let segment = Self.segment(entries, start: start, through: latest.capturedAt, reset: reset, allowMissingReset: true)
+        guard !segment.isEmpty else { return nil }
+        self.start = start
+        self.reset = reset
+        self.samples = segment.map { Sample(date: $0.capturedAt, remaining: min(100, max(0, 100 - $0.usedPercent))) }
+    }
+
+    /// A finished window, for display context only. Entries must name this reset explicitly.
+    private init?(series: PlanUsageSeries, finishedAt reset: Date) {
+        guard series.windowMinutes > 0 else { return nil }
+        let start = reset.addingTimeInterval(-Double(series.windowMinutes) * 60)
+        let segment = Self.segment(Self.sorted(series.entries), start: start, through: reset, reset: reset, allowMissingReset: false)
+        guard !segment.isEmpty else { return nil }
+        self.start = start
+        self.reset = reset
+        self.samples = segment.map { Sample(date: $0.capturedAt, remaining: min(100, max(0, 100 - $0.usedPercent))) }
+    }
+
+    /// The most recent window that ended at or before `current` started. Forecasts never use it.
+    static func previous(series: PlanUsageSeries, before current: PlanUsageGraph) -> PlanUsageGraph? {
+        let cutoff = current.start.addingTimeInterval(120)
+        guard let reset = series.entries.compactMap(\.resetsAt)
+            .filter({ $0 <= cutoff && abs($0.timeIntervalSince(current.reset)) > 120 }).max() else { return nil }
+        return PlanUsageGraph(series: series, finishedAt: reset)
+    }
+
+    private static func sorted(_ entries: [PlanUsageEntry]) -> [PlanUsageEntry] {
+        entries.sorted {
+            if $0.capturedAt != $1.capturedAt { return $0.capturedAt < $1.capturedAt }
+            if $0.usedPercent != $1.usedPercent { return $0.usedPercent < $1.usedPercent }
+            return ($0.resetsAt ?? .distantPast) < ($1.resetsAt ?? .distantPast)
+        }
+    }
+
+    /// Captures for one reset boundary (120-second equivalence); a usage drop restarts the line.
+    private static func segment(_ entries: [PlanUsageEntry], start: Date, through end: Date, reset: Date, allowMissingReset: Bool) -> [PlanUsageEntry] {
         var segment: [PlanUsageEntry] = []
         for entry in entries {
-            guard entry.capturedAt >= start, entry.capturedAt <= latest.capturedAt,
+            guard entry.capturedAt >= start, entry.capturedAt <= end,
                   entry.usedPercent.isFinite,
-                  entry.resetsAt.map({ abs($0.timeIntervalSince(reset)) <= 120 }) ?? true else { continue }
+                  entry.resetsAt.map({ abs($0.timeIntervalSince(reset)) <= 120 }) ?? allowMissingReset else { continue }
             if let last = segment.last {
                 if entry.capturedAt == last.capturedAt { segment[segment.count - 1] = entry; continue }
                 if entry.usedPercent < last.usedPercent { segment.removeAll() }
             }
             segment.append(entry)
         }
-        guard !segment.isEmpty else { return nil }
-        self.start = start
-        self.reset = reset
-        self.samples = segment.map { Sample(date: $0.capturedAt, remaining: min(100, max(0, 100 - $0.usedPercent))) }
+        return segment
     }
 
     func progress(_ date: Date) -> Double {
@@ -270,5 +305,140 @@ struct PlanUsageHistoryReader {
                 : lane == "weekly" && (10070...10090).contains(first.windowMinutes) ? 10080 : first.windowMinutes
             return PlanUsageSeries(name: lane, windowMinutes: duration, entries: values.flatMap(\.entries))
         }.sorted { $0.windowMinutes == $1.windowMinutes ? $0.name < $1.name : $0.windowMinutes < $1.windowMinutes }
+    }
+}
+
+/// Deterministic, collision-aware placement for in-chart labels.
+/// Lane labels (Now, resets, run-outs) live in reserved bands above and below the data;
+/// floating labels (provider tags) try a fixed list of offsets around their point.
+/// Text never decides data: every label stays in the detail rows below the chart.
+struct PlanUsageAnnotationLayout {
+    enum Band: Equatable { case top, bottom }
+    enum Kind: Equatable { case lane(Band), floating(CGPoint) }
+
+    struct Label: Equatable {
+        let id: String
+        /// Preferred text first; later variants are shorter. The last one is the minimum.
+        let variants: [String]
+        /// Plot-space x the label must stay attached to.
+        let anchorX: CGFloat
+        let kind: Kind
+    }
+
+    struct Placement: Equatable {
+        let id: String
+        let text: String
+        let variant: Int
+        let frame: CGRect
+        /// Lane index from the data edge outwards; nil for floating labels.
+        let lane: Int?
+    }
+
+    struct Result: Equatable {
+        let placements: [Placement]
+        let dropped: [String]
+    }
+
+    static let laneHeight: CGFloat = 18
+    static let gap: CGFloat = 4
+
+    let plot: CGRect
+    let topLanes: Int
+    let bottomLanes: Int
+    let measure: (String) -> CGFloat
+
+    /// Top lanes stack upwards from the 100% line; bottom lanes stack downwards from the 0% line.
+    func laneRect(_ band: Band, _ lane: Int) -> CGRect {
+        let height = Self.laneHeight
+        let y = band == .top
+            ? plot.minY + CGFloat(topLanes - 1 - lane) * height
+            : plot.maxY - CGFloat(bottomLanes - lane) * height
+        return CGRect(x: plot.minX, y: y, width: plot.width, height: height)
+    }
+
+    /// Labels are placed in array order (priority). Each pass tries every lane/offset before
+    /// shortening; if any label is dropped, the next pass starts every label one variant shorter.
+    func solve(_ labels: [Label], obstacles: [CGRect] = []) -> Result {
+        let levels = max(1, labels.map(\.variants.count).max() ?? 1)
+        var best: Result?
+        for level in 0..<levels {
+            let result = pass(labels, startLevel: level, obstacles: obstacles)
+            if result.dropped.isEmpty { return result }
+            if best == nil || result.dropped.count < best!.dropped.count { best = result }
+        }
+        return best ?? Result(placements: [], dropped: labels.map(\.id))
+    }
+
+    private func pass(_ labels: [Label], startLevel: Int, obstacles: [CGRect]) -> Result {
+        var placed: [Placement] = []
+        var dropped: [String] = []
+        for label in labels {
+            var chosen: Placement?
+            search: for variant in min(startLevel, label.variants.count - 1)..<label.variants.count {
+                let text = label.variants[variant]
+                let size = CGSize(width: ceil(measure(text)), height: Self.laneHeight - 2)
+                for (frame, lane) in candidates(label, size: size) {
+                    let padded = frame.insetBy(dx: -Self.gap / 2, dy: 0)
+                    let fitsLabels = !placed.contains { $0.frame.insetBy(dx: -Self.gap / 2, dy: 0).intersects(padded) }
+                    let fitsObstacles = lane != nil || !obstacles.contains { $0.intersects(frame) }
+                    if fitsLabels && fitsObstacles {
+                        chosen = Placement(id: label.id, text: text, variant: variant, frame: frame, lane: lane)
+                        break search
+                    }
+                }
+            }
+            if let chosen { placed.append(chosen) } else { dropped.append(label.id) }
+        }
+        return Result(placements: placed, dropped: dropped)
+    }
+
+    private func candidates(_ label: Label, size: CGSize) -> [(CGRect, Int?)] {
+        guard size.width <= plot.width else { return [] }
+        func clamped(_ frame: CGRect) -> CGRect {
+            var frame = frame
+            frame.origin.x = min(max(frame.minX, plot.minX), plot.maxX - frame.width)
+            return frame
+        }
+        switch label.kind {
+        case .lane(let band):
+            let lanes = band == .top ? topLanes : bottomLanes
+            var output: [(CGRect, Int?)] = []
+            for lane in 0..<lanes {
+                let row = laneRect(band, lane)
+                let y = row.midY - size.height / 2
+                // Centered, then starting at the rule, then ending at it: every option touches the rule.
+                for x in [label.anchorX - size.width / 2, label.anchorX - 6, label.anchorX - size.width + 6] {
+                    output.append((clamped(CGRect(x: x, y: y, width: size.width, height: size.height)), lane))
+                }
+            }
+            return output
+        case .floating(let point):
+            let offset: CGFloat = 8
+            let raw = [
+                CGPoint(x: point.x + offset, y: point.y - offset - size.height),
+                CGPoint(x: point.x + offset, y: point.y + offset),
+                CGPoint(x: point.x - offset - size.width, y: point.y - offset - size.height),
+                CGPoint(x: point.x - offset - size.width, y: point.y + offset),
+                CGPoint(x: point.x - size.width / 2, y: point.y - offset - 6 - size.height),
+                CGPoint(x: point.x - size.width / 2, y: point.y + offset + 6),
+                CGPoint(x: point.x + offset, y: point.y - offset - 2 * size.height),
+                CGPoint(x: point.x - offset - size.width, y: point.y + offset + size.height)
+            ]
+            // Floating labels stay between the reserved bands so they never cover lane labels.
+            let dataTop = plot.minY + CGFloat(topLanes) * Self.laneHeight
+            let dataBottom = plot.maxY - CGFloat(bottomLanes) * Self.laneHeight
+            return raw.map { CGRect(origin: $0, size: size) }
+                .filter { $0.minX >= plot.minX && $0.maxX <= plot.maxX && $0.minY >= dataTop && $0.maxY <= dataBottom }
+                .map { ($0, nil) }
+        }
+    }
+
+    /// Keeps axis labels at least `minimumGap` apart (in plot fraction), always keeping the first.
+    static func thinned(_ positions: [Double], minimumGap: Double) -> [Double] {
+        var output: [Double] = []
+        for position in positions.sorted() where output.last.map({ position - $0 >= minimumGap }) ?? true {
+            output.append(position)
+        }
+        return output
     }
 }
