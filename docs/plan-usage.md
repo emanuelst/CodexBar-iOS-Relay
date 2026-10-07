@@ -41,15 +41,15 @@ swiftc -parse-as-library -o /tmp/layout-checks Tests/PlanUsageAnnotationLayoutCh
 
 ### Session context after a reset
 
-While a session window is in its first half, Session views (single-provider and Combined, actual time) also draw the previous finished window as a faint line labelled "previous window". It is rebuilt read-only from the same recorded history via `PlanUsageGraph.previous(series:before:)`, which uses the same reset-boundary and usage-drop rules. Forecasts never use it. Time after Now is shaded as forecast. Now is a solid neutral rule. Window starts are square markers only, with no vertical rule. A window with no usage yet shows "no usage yet" instead of a flat projection on the 100% gridline; otherwise a window with a single capture is tagged "new window". Forecast rows say "Lasts to reset" when the projected run-out falls after the reset.
+While a session window is in its first half, Session views (single-provider and Combined, actual time) also draw the previous finished window as a faint line labelled "previous window". It is rebuilt read-only from the same recorded history via `PlanUsageGraph.previous(series:before:)`, which uses the same reset-boundary and usage-drop rules. Forecasts never use it. Now is a solid neutral rule. Window starts are square markers only, with no vertical rule. A window with no usage yet shows "no usage yet" instead of a flat projection on the 100% gridline; otherwise a window with a single capture is tagged "new window". Forecast rows say "Lasts to reset" when the projected run-out falls after the reset.
 
 ### Below the chart
 
-One key line explains the marks: start, reset, Now, shaded forecast, and the faint previous window when shown. Each quota window then has one summary in provider order. The first line gives the provider and window, % left, and the outlook: "Out … at this pace", "Lasts to reset · would run out … at this pace", "Lasts through reset", "No usage yet" or "Waiting for enough usage to estimate". The second line gives the exact reset time and countdown. The third gives the exact window start and the last capture, flagged when stale. This replaces the separate legend, forecast grid and per-provider start/reset/remaining/capture rows.
+One key line explains the marks: start, reset, Now, dashed forecast, and the faint previous window when shown. Each quota window then has one summary in provider order. The first line gives the provider and window, % left, and the outlook: "Out … at this pace", "Lasts to reset · would run out … at this pace", "Lasts through reset", "No usage yet" or "Waiting for enough usage to estimate". The second line gives the exact reset time and countdown. The third gives the exact window start and the last capture, flagged when stale. This replaces the separate legend, forecast grid and per-provider start/reset/remaining/capture rows.
 
 ### Combined chart labels
 
-Combined Session and Weekly stay one overlaid chart. A colour key in the chart header (● Codex ● Claude) names the lines. Each latest point is labelled with its value in the provider colour ("65%", or "100% · no usage yet") instead of a floating provider-name pill. Reset and run-out labels sit away from the lines, so they keep the provider name.
+Combined Session and Weekly stay one overlaid chart. A colour key in the chart header (● Codex ● Claude) names the lines. Each latest point is labelled with a line mark, its name and its value in the provider colour ("━ Claude 65%", or "━ Codex 100% · no usage yet"). Under tight space it shortens to the value. Reset and run-out labels sit away from the lines, so they keep the provider name.
 
 ### Early resets and the axis end
 
@@ -60,3 +60,9 @@ The previous window (Session and Weekly, while the current window is in its firs
 Event labels share one pattern: "<Provider> resets <when>" in the top lanes, and "<Provider> runs out <when>" or "<Provider> lasts to reset" in the bottom lanes. Both adds "5h"/"wk". The hypothetical after-reset date appears only in the summary row.
 
 Every window starts at 100% left, but CodexBar captures roughly hourly, so the first recorded point can come up to an hour after the start marker. A faint dotted segment joins the start marker to the first capture (actual-time views only). This shows the known starting value without implying a recorded path in between.
+
+### Session vs weekly marks
+
+Line style means the same thing everywhere: solid is recorded or known, dashed is predicted. Reset rules are solid. The start connector is dotted because that segment was not recorded. Marks are filled for 5h sessions (■ start, ◆ reset) and outlined for weekly and other long windows (□, ◇). In Both, 5h uses the full provider colour and weekly an opaque receding shade of it (mixed halfway toward the window background, so lighter in light mode and darker in dark mode), for lines, points, marks and rules alike. No line is transparent. Forecasts use their line's colour, and the previous window and start connector use opaque receding shades too. The only shading is the expanded-hours band between the // marks in Both. Other views have no tint; the solid Now rule and the dashed forecasts separate past from future. The key under each chart lists the marks, line styles and shading actually shown.
+
+Each event and line label starts with the mark it stands for, in that mark's exact colour: ━ line, ◆ 5h reset, ◇ weekly reset, ● runs out, ○ lasts to reset. In Both, weekly label text uses a slightly receded shade that matches its lighter line but stays readable. Resets sit in the top lanes and predictions in the bottom lanes.

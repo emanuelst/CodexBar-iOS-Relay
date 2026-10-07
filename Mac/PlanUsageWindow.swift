@@ -16,6 +16,13 @@ private struct PlanUsageRunoutForecast {
 }
 
 /// One in-chart label in chart value space; resolved to points by the chart proxy.
+/// The chart mark a label stands for, drawn at its start in the mark's exact colour.
+private enum PlanUsageLabelIcon {
+    case line
+    case reset(filled: Bool)
+    case runout(filled: Bool)
+}
+
 private struct PlanUsageChartLabel {
     let id: String
     let variants: [String]
@@ -23,6 +30,8 @@ private struct PlanUsageChartLabel {
     var y: Double? = nil
     let band: PlanUsageAnnotationLayout.Band?
     let color: Color
+    var icon: PlanUsageLabelIcon? = nil
+    var iconColor: Color? = nil
 }
 
 /// Labels in priority order plus marker points floating labels must not cover.
@@ -153,8 +162,8 @@ struct PlanUsageWindow: View {
     @ChartContentBuilder
     private func earlyResetRule<X: Plottable>(_ id: String, at x: X, previous: PlanUsageGraph, now: Date) -> some ChartContent {
         RuleMark(x: .value("Reset early", x))
-            .foregroundStyle(color(id).opacity(0.6))
-            .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [3, 2]))
+            .foregroundStyle(Self.receded(baseColor(id), by: 0.55))
+            .lineStyle(StrokeStyle(lineWidth: 1, dash: [1, 3]))
             .accessibilityLabel("\(id.capitalized) reset early; was due \(ResetCountdown.absoluteDateTime(previous.reset, now: now))")
     }
 
@@ -169,7 +178,7 @@ struct PlanUsageWindow: View {
     private func previousWindowMarks<X: Plottable>(_ id: String, _ previous: PlanUsageGraph, x: @escaping (Date) -> X, yLabel: String) -> some ChartContent {
         ForEach(previous.samples, id: \.date) { point in
             LineMark(x: .value("Time", x(point.date)), y: .value(yLabel, point.remaining), series: .value("Series", id + " previous window"))
-                .foregroundStyle(color(id).opacity(0.22)).lineStyle(StrokeStyle(lineWidth: 1.2))
+                .foregroundStyle(Self.receded(baseColor(id), by: 0.75)).lineStyle(StrokeStyle(lineWidth: 1.2))
         }
         .accessibilityLabel("\(id.capitalized) previous window")
     }
@@ -181,19 +190,57 @@ struct PlanUsageWindow: View {
         if let first = graph.samples.first, first.date.timeIntervalSince(graph.start) > 60 {
             ForEach([PlanUsageGraph.Sample(date: graph.start, remaining: 100), first], id: \.date) { point in
                 LineMark(x: .value("Time", x(point.date)), y: .value(yLabel, point.remaining), series: .value("Series", id + " start connector"))
-                    .foregroundStyle(color(id).opacity(0.5)).lineStyle(StrokeStyle(lineWidth: 1.2, dash: [1, 3]))
+                    .foregroundStyle(Self.receded(baseColor(id), by: 0.45)).lineStyle(StrokeStyle(lineWidth: 1.2, dash: [1, 3]))
             }
             .accessibilityHidden(true)
         }
     }
 
-    private func color(_ id: String) -> Color {
+    // One visual language for quota windows, in every view: 5h session marks are filled with
+    // short-dash reset rules; weekly (and other long windows) are outlined with long, lighter dashes.
+    private func isSession(_ window: String) -> Bool { window == "session" }
+
+    private func startMark(_ tint: Color, session: Bool) -> some View {
+        Rectangle().fill(session ? tint : Color(nsColor: .windowBackgroundColor))
+            .overlay(Rectangle().strokeBorder(tint, lineWidth: session ? 0 : 1.5))
+            .frame(width: 8, height: 8)
+    }
+
+    private func resetMark(_ tint: Color, session: Bool) -> some View {
+        Rectangle().fill(session ? tint : Color(nsColor: .windowBackgroundColor))
+            .overlay(Rectangle().strokeBorder(tint, lineWidth: session ? 0 : 1.5))
+            .frame(width: 7, height: 7).rotationEffect(.degrees(45))
+    }
+
+    /// Resets are known times, so their rules are solid; dashes are reserved for predictions.
+    private func resetRuleStyle(_ window: String) -> StrokeStyle { StrokeStyle(lineWidth: 1.2) }
+
+    private func resetRuleOpacity(_ window: String) -> Double { 1 }
+
+    /// In Both, weekly is an opaque receding shade of the provider colour, so 5h and weekly separate by colour.
+    private func bothTint(_ id: String, _ window: String) -> Color {
+        isSession(window) ? color(id) : Self.receded(baseColor(id))
+    }
+
+    private func color(_ id: String) -> Color { Color(nsColor: baseColor(id)) }
+
+    private func baseColor(_ id: String) -> NSColor {
         // CodexBar shipped provider colours. Optional config overrides use the same RGB hex format.
         let defaults = id == "codex" ? "49A3B0" : "CC7C5E"
         let hex = accents[id] ?? defaults
         let value = UInt64(hex, radix: 16) ?? 0
-        return Color(red: Double((value >> 16) & 255) / 255,
-                     green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255)
+        return NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255,
+                       green: CGFloat((value >> 8) & 255) / 255, blue: CGFloat(value & 255) / 255, alpha: 1)
+    }
+
+    /// An opaque, receding shade: the colour mixed halfway toward the window background, so it is
+    /// lighter in light mode and darker in dark mode, and nothing shows through it.
+    private static func receded(_ base: NSColor, by fraction: CGFloat = 0.5) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let background = dark ? NSColor(srgbRed: 0.15, green: 0.15, blue: 0.16, alpha: 1) : NSColor.white
+            return base.usingColorSpace(.sRGB)?.blended(withFraction: fraction, of: background) ?? base
+        })
     }
 
     @ViewBuilder
@@ -209,8 +256,6 @@ struct PlanUsageWindow: View {
                 let previous = previousGraph(id, window: window, current: graph, now: now)
                 let axis = PlanUsageTimeAxis(start: min(graph.start, previous?.start ?? graph.start), end: axisEnd, timeZone: timeZone)
                 Chart {
-                    RectangleMark(xStart: .value("Forecast", now), xEnd: .value("Forecast", axis.plotEnd), yStart: .value("Bottom", 0.0), yEnd: .value("Top", 100.0))
-                        .foregroundStyle(.secondary.opacity(0.07)).accessibilityHidden(true)
                     if let previous {
                         previousWindowMarks(id, previous, x: { $0 }, yLabel: "Remaining")
                         if previous.resetEarly(before: graph) {
@@ -218,7 +263,7 @@ struct PlanUsageWindow: View {
                         }
                     }
                     PointMark(x: .value("Window start", graph.start), y: .value("Top", 100))
-                        .symbol(.square).symbolSize(50).foregroundStyle(color(id))
+                        .symbol { startMark(color(id), session: isSession(window)) }
                         .accessibilityLabel("\(id.capitalized) window start")
                         .accessibilityValue(ResetCountdown.absoluteDateTime(graph.start, now: now))
                     if let forecast, !isUnused(graph) {
@@ -226,10 +271,10 @@ struct PlanUsageWindow: View {
                         let beforeReset = min(endpoint, graph.reset)
                         let beforeResetRemaining = forecast.pace.remainingPercent(at: beforeReset, observedAt: graph.last.date) ?? graph.last.remaining
                         LineMark(x: .value("Time", graph.last.date), y: .value("Remaining", graph.last.remaining), series: .value("Series", "Run-out projection"))
-                            .foregroundStyle(color(id).opacity(0.55))
+                            .foregroundStyle(color(id))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                         LineMark(x: .value("Time", beforeReset), y: .value("Remaining", beforeResetRemaining), series: .value("Series", "Run-out projection"))
-                            .foregroundStyle(color(id).opacity(0.55))
+                            .foregroundStyle(color(id))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                         if let depletionDate = forecast.depletionDate, depletionDate > graph.reset {
                             PointMark(x: .value("Lasts to reset", graph.reset), y: .value("Remaining", forecast.remainingAtReset))
@@ -251,12 +296,12 @@ struct PlanUsageWindow: View {
                     PointMark(x: .value("Time", graph.last.date), y: .value("Remaining", graph.last.remaining))
                         .foregroundStyle(color(id)).symbolSize(60)
                     RuleMark(x: .value("Reset", graph.reset))
-                        .foregroundStyle(color(id))
-                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [3, 2]))
+                        .foregroundStyle(color(id).opacity(resetRuleOpacity(window)))
+                        .lineStyle(resetRuleStyle(window))
                         .accessibilityLabel("\(id.capitalized) reset")
                         .accessibilityValue(ResetCountdown.absoluteDateTime(graph.reset, now: now))
                     PointMark(x: .value("Reset", graph.reset), y: .value("Top", 100))
-                        .symbol(.diamond).symbolSize(64).foregroundStyle(color(id))
+                        .symbol { resetMark(color(id), session: isSession(window)) }
                         .accessibilityHidden(true)
                     RuleMark(x: .value("Now", now))
                         .foregroundStyle(Color.primary.opacity(0.45))
@@ -293,7 +338,7 @@ struct PlanUsageWindow: View {
                 }
                 .chartLegend(.hidden).frame(height: 222)
                 .accessibilityLabel(id.capitalized + " recorded remaining quota")
-                chartKey(previous: previous != nil)
+                chartKey(previous: previous != nil, windows: [window])
                 summaryRow(id, window: window, graph: graph, title: id.capitalized, now: now)
             } else { unavailable(id, window: window) }
         }.padding(16).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
@@ -323,7 +368,7 @@ struct PlanUsageWindow: View {
 
     private func normalizedGuidePoint(id: String, x: Double, y: Double) -> some ChartContent {
         LineMark(x: .value("Window position", x), y: .value("Remaining %", y), series: .value("Series", id + " guide"))
-            .foregroundStyle(color(id).opacity(0.55)).lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            .foregroundStyle(color(id)).lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
     }
 
     @ChartContentBuilder
@@ -425,11 +470,7 @@ struct PlanUsageWindow: View {
                 Chart {
                     if !normalized, !focus.breakDates.isEmpty {
                         RectangleMark(xStart: .value("Expanded hours", focus.position(focus.focusStart)), xEnd: .value("Expanded hours", focus.position(focus.focusEnd)), yStart: .value("Bottom", 0.0), yEnd: .value("Top", 100.0))
-                            .foregroundStyle(.secondary.opacity(0.045)).accessibilityHidden(true)
-                    }
-                    if !normalized {
-                        RectangleMark(xStart: .value("Forecast", focus.position(now)), xEnd: .value("Forecast", 1.0), yStart: .value("Bottom", 0.0), yEnd: .value("Top", 100.0))
-                            .foregroundStyle(.secondary.opacity(0.07)).accessibilityHidden(true)
+                            .foregroundStyle(.secondary.opacity(0.06)).accessibilityHidden(true)
                     }
                     if normalized {
                         RuleMark(x: .value("Shared reset boundary", 100))
@@ -445,14 +486,15 @@ struct PlanUsageWindow: View {
                         let id = item.provider
                         let quotaWindow = item.window
                         let graph = item.graph
-                        let lineStyle = StrokeStyle(lineWidth: quotaWindow == "session" ? 2.4 : 2, dash: quotaWindow == "session" ? [] : [5, 3])
+                        // 5h solid and full colour; weekly long-dashed and lighter, so it reads as the background budget.
+                        let lineStyle = StrokeStyle(lineWidth: isSession(quotaWindow) ? 2.4 : 2.2)
 
                         if normalized {
                             evenUseGuide(series: item.id)
                         } else if let forecast = runoutForecast(graph), !isUnused(graph) {
                             let end = min(forecast.depletionDate ?? graph.reset, graph.reset)
                             let remaining = forecast.pace.remainingPercent(at: end, observedAt: graph.last.date) ?? graph.last.remaining
-                            focusedLine([graph.last, .init(date: end, remaining: remaining)], series: "Forecast " + item.id, axis: focus, tint: color(id).opacity(0.62), stroke: StrokeStyle(lineWidth: 1.2, dash: quotaWindow == "session" ? [4, 3] : [2, 3]))
+                            focusedLine([graph.last, .init(date: end, remaining: remaining)], series: "Forecast " + item.id, axis: focus, tint: bothTint(id, quotaWindow), stroke: StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
                             if let depletion = forecast.depletionDate {
                                 let afterReset = depletion > graph.reset
                                 runoutPoint(id: id, window: quotaWindow, date: depletion, now: now,
@@ -463,29 +505,29 @@ struct PlanUsageWindow: View {
 
                         if !normalized, let first = graph.samples.first, first.date.timeIntervalSince(graph.start) > 60 {
                             focusedLine([.init(date: graph.start, remaining: 100), first], series: "Start " + item.id, axis: focus,
-                                        tint: color(id).opacity(0.5), stroke: StrokeStyle(lineWidth: 1.2, dash: [1, 3]))
+                                        tint: bothTint(id, quotaWindow), stroke: StrokeStyle(lineWidth: 1.2, dash: [1, 3]))
                         }
                         ForEach(normalized ? graph.samples : focus.vertices(graph.samples), id: \.date) { point in
                             LineMark(x: .value("Time", normalized ? graph.progress(point.date) : focus.position(point.date)), y: .value("Remaining", point.remaining), series: .value("Quota", item.id))
-                                .foregroundStyle(color(id))
+                                .foregroundStyle(bothTint(id, quotaWindow))
                                 .lineStyle(lineStyle)
                         }
                         PointMark(x: .value("Latest capture", normalized ? graph.progress(graph.last.date) : focus.position(graph.last.date)), y: .value("Remaining", graph.last.remaining))
-                            .foregroundStyle(color(id)).symbolSize(38)
+                            .foregroundStyle(bothTint(id, quotaWindow)).symbolSize(38)
                             .accessibilityLabel("\(id.capitalized) \(quotaWindow == "session" ? "5-hour" : "weekly") latest capture")
 
                         if !normalized {
                             PointMark(x: .value("\(id.capitalized) \(quotaWindow) start", focus.position(graph.start)), y: .value("Top", 100))
-                                .symbol(.square).symbolSize(48).foregroundStyle(color(id))
+                                .symbol { startMark(bothTint(id, quotaWindow), session: isSession(quotaWindow)) }
                                 .accessibilityLabel("\(id.capitalized) \(quotaWindow) window start")
                                 .accessibilityValue(ResetCountdown.absoluteDateTime(graph.start, now: now))
                             RuleMark(x: .value("\(id.capitalized) \(quotaWindow) reset", focus.position(graph.reset)))
-                                .foregroundStyle(color(id))
-                                .lineStyle(StrokeStyle(lineWidth: 1.4, dash: [3, 2]))
+                                .foregroundStyle(bothTint(id, quotaWindow).opacity(resetRuleOpacity(quotaWindow)))
+                                .lineStyle(resetRuleStyle(quotaWindow))
                                 .accessibilityLabel("\(id.capitalized) \(quotaWindow) reset")
                                 .accessibilityValue(ResetCountdown.absoluteDateTime(graph.reset, now: now))
                             PointMark(x: .value("\(id.capitalized) \(quotaWindow) reset", focus.position(graph.reset)), y: .value("Top", 100))
-                                .symbol(.diamond).symbolSize(60).foregroundStyle(color(id))
+                                .symbol { resetMark(bothTint(id, quotaWindow), session: isSession(quotaWindow)) }
                                 .accessibilityHidden(true)
                         }
                     }
@@ -556,7 +598,7 @@ struct PlanUsageWindow: View {
             if normalized {
                 Label("Even-use guide", systemImage: "line.diagonal").font(.caption2).foregroundStyle(.secondary)
             } else {
-                chartKey(previous: false)
+                chartKey(previous: false, windows: ["session", "weekly"], expanded: !focus.breakDates.isEmpty)
             }
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(entries, id: \.id) { item in
@@ -586,8 +628,6 @@ struct PlanUsageWindow: View {
             if !graphs.isEmpty {
             Chart {
                 if !normalized {
-                    RectangleMark(xStart: .value("Forecast", now.timeIntervalSince1970), xEnd: .value("Forecast", axis.plotEnd.timeIntervalSince1970), yStart: .value("Bottom", 0.0), yEnd: .value("Top", 100.0))
-                        .foregroundStyle(.secondary.opacity(0.07)).accessibilityHidden(true)
                     ForEach(previous, id: \.0) { id, prior in
                         previousWindowMarks(id, prior, x: { $0.timeIntervalSince1970 }, yLabel: "Remaining %")
                         if let current = graphs.first(where: { $0.0 == id })?.1, prior.resetEarly(before: current) {
@@ -615,10 +655,10 @@ struct PlanUsageWindow: View {
                         let preResetEnd = min(endpoint, graph.reset)
                         let preResetRemaining = forecast.pace.remainingPercent(at: preResetEnd, observedAt: graph.last.date) ?? graph.last.remaining
                         LineMark(x: .value("Time", graph.last.date.timeIntervalSince1970), y: .value("Remaining %", graph.last.remaining), series: .value("Series", id + " run-out projection"))
-                            .foregroundStyle(color(id).opacity(0.55))
+                            .foregroundStyle(color(id))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                         LineMark(x: .value("Time", preResetEnd.timeIntervalSince1970), y: .value("Remaining %", preResetRemaining), series: .value("Series", id + " run-out projection"))
-                            .foregroundStyle(color(id).opacity(0.55))
+                            .foregroundStyle(color(id))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                         if let depletion = forecast.depletionDate, depletion > graph.reset {
                             PointMark(x: .value("Lasts to reset", graph.reset.timeIntervalSince1970), y: .value("Remaining %", forecast.remainingAtReset))
@@ -636,7 +676,7 @@ struct PlanUsageWindow: View {
                 if !normalized {
                     ForEach(graphs, id: \.0) { id, graph in
                         PointMark(x: .value("\(id.capitalized) window start", graph.start.timeIntervalSince1970), y: .value("Top", 100))
-                            .symbol(.square).symbolSize(50).foregroundStyle(color(id))
+                            .symbol { startMark(color(id), session: isSession(window)) }
                             .accessibilityLabel("\(id.capitalized) window start")
                             .accessibilityValue(ResetCountdown.absoluteDateTime(graph.start, now: now))
                     }
@@ -647,12 +687,12 @@ struct PlanUsageWindow: View {
                         .accessibilityValue(ResetCountdown.absoluteDateTime(now, now: now))
                     ForEach(graphs, id: \.0) { id, graph in
                         RuleMark(x: .value("\(id.capitalized) reset", graph.reset.timeIntervalSince1970))
-                            .foregroundStyle(color(id))
-                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [3, 2]))
+                            .foregroundStyle(color(id).opacity(resetRuleOpacity(window)))
+                            .lineStyle(resetRuleStyle(window))
                             .accessibilityLabel("\(id.capitalized) reset")
                             .accessibilityValue(ResetCountdown.absoluteDateTime(graph.reset, now: now))
                         PointMark(x: .value("\(id.capitalized) reset", graph.reset.timeIntervalSince1970), y: .value("Top", 100))
-                            .symbol(.diamond).symbolSize(64).foregroundStyle(color(id))
+                            .symbol { resetMark(color(id), session: isSession(window)) }
                             .accessibilityHidden(true)
                     }
                 }
@@ -715,7 +755,7 @@ struct PlanUsageWindow: View {
             if normalized {
                 Label("Even-use guide", systemImage: "line.diagonal").font(.caption2).foregroundStyle(.secondary)
             } else {
-                chartKey(previous: !previous.isEmpty)
+                chartKey(previous: !previous.isEmpty, windows: [window])
             }
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(["codex", "claude"], id: \.self) { id in
@@ -730,15 +770,32 @@ struct PlanUsageWindow: View {
     // MARK: - Below the chart
 
     /// One shared key for the marks; provider colours are carried by the summary rows.
-    private func chartKey(previous: Bool) -> some View {
+    private func chartKey(previous: Bool, windows: [String], expanded: Bool = false) -> some View {
         HStack(spacing: 14) {
-            Label("Start", systemImage: "square.fill")
-            Label("Reset", systemImage: "diamond.fill")
+            ForEach(windows, id: \.self) { window in
+                Label {
+                    Text(windows.count > 1 ? (isSession(window) ? "5h start · reset" : "Weekly start · reset") : "Start · reset")
+                } icon: {
+                    HStack(spacing: 3) {
+                        let tint = windows.count > 1 && !isSession(window) ? Self.receded(.secondaryLabelColor) : Color.secondary
+                        if windows.count > 1 { lineSwatch(tint, dashed: false) }
+                        startMark(tint, session: isSession(window))
+                        resetMark(tint, session: isSession(window))
+                    }
+                }
+            }
             Label("Now", systemImage: "poweron")
-            Label("Forecast (shaded)", systemImage: "rectangle.fill")
+            Label { Text("Forecast") } icon: { lineSwatch(Color.secondary, dashed: true) }
+            if expanded { Label("Expanded hours (shaded)", systemImage: "rectangle.fill") }
             if previous { Label("Previous window (faint)", systemImage: "line.diagonal") }
         }
         .font(.caption2).foregroundStyle(.secondary)
+    }
+
+    private func lineSwatch(_ tint: Color, dashed: Bool) -> some View {
+        Path { path in path.move(to: CGPoint(x: 0, y: 4)); path.addLine(to: CGPoint(x: 14, y: 4)) }
+            .stroke(tint, style: StrokeStyle(lineWidth: 2, dash: dashed ? [4, 2] : []))
+            .frame(width: 14, height: 8)
     }
 
     /// What happens next for one quota window, in words.
@@ -797,12 +854,15 @@ struct PlanUsageWindow: View {
             let placed = Self.placements(annotations, proxy: proxy, plot: plot, topLanes: topLanes, bottomLanes: bottomLanes)
             ZStack(alignment: .topLeading) {
                 ForEach(placed, id: \.placement.id) { item in
-                    Text(item.placement.text)
-                        .font(.system(size: Self.labelFontSize, weight: .semibold))
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .fixedSize()
-                        .foregroundStyle(item.color)
+                    HStack(spacing: Self.iconSpacing) {
+                        if let icon = item.icon { labelIcon(icon, tint: item.iconColor ?? item.color) }
+                        Text(item.placement.text)
+                            .font(.system(size: Self.labelFontSize, weight: .semibold))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .fixedSize()
+                            .foregroundStyle(item.color)
+                    }
                         .frame(width: item.placement.frame.width, height: item.placement.frame.height)
                         .background(Capsule().fill(Color(nsColor: .windowBackgroundColor).opacity(0.94)))
                         .overlay(Capsule().strokeBorder(item.color.opacity(0.35), lineWidth: 0.5))
@@ -814,7 +874,21 @@ struct PlanUsageWindow: View {
         .allowsHitTesting(false)
     }
 
-    private static func placements(_ annotations: PlanUsageChartAnnotations, proxy: ChartProxy, plot: CGRect, topLanes: Int, bottomLanes: Int) -> [(placement: PlanUsageAnnotationLayout.Placement, color: Color, fullText: String)] {
+    private static let iconSize: CGFloat = 8
+    private static let iconSpacing: CGFloat = 4
+
+    @ViewBuilder
+    private func labelIcon(_ icon: PlanUsageLabelIcon, tint: Color) -> some View {
+        switch icon {
+        case .line: Capsule().fill(tint).frame(width: Self.iconSize + 2, height: 2.5)
+        case .reset(let filled): resetMark(tint, session: filled).frame(width: Self.iconSize, height: Self.iconSize)
+        case .runout(let filled):
+            if filled { Circle().fill(tint).frame(width: Self.iconSize - 1, height: Self.iconSize - 1) }
+            else { Circle().strokeBorder(tint, lineWidth: 1.5).frame(width: Self.iconSize, height: Self.iconSize) }
+        }
+    }
+
+    private static func placements(_ annotations: PlanUsageChartAnnotations, proxy: ChartProxy, plot: CGRect, topLanes: Int, bottomLanes: Int) -> [(placement: PlanUsageAnnotationLayout.Placement, color: Color, fullText: String, icon: PlanUsageLabelIcon?, iconColor: Color?)] {
         guard plot.width > 0 else { return [] }
         func x(_ value: Double) -> CGFloat? {
             let position = annotations.dateAxis ? proxy.position(forX: Date(timeIntervalSince1970: value)) : proxy.position(forX: value)
@@ -835,10 +909,14 @@ struct PlanUsageWindow: View {
             guard let px = x(marker.x), let py = y(marker.y) else { return nil }
             return CGRect(x: px - 6, y: py - 6, width: 12, height: 12)
         }
-        let layout = PlanUsageAnnotationLayout(plot: plot, topLanes: topLanes, bottomLanes: bottomLanes, measure: labelWidth)
+        // Labels with a leading mark need room for it; the layout measures text only.
+        let iconTexts = Set(annotations.labels.filter { $0.icon != nil }.flatMap(\.variants))
+        let iconWidth = iconSize + 2 + iconSpacing
+        let layout = PlanUsageAnnotationLayout(plot: plot, topLanes: topLanes, bottomLanes: bottomLanes,
+                                               measure: { labelWidth($0) + (iconTexts.contains($0) ? iconWidth : 0) })
         let byID = Dictionary(uniqueKeysWithValues: annotations.labels.map { ($0.id, $0) })
         return layout.solve(labels, obstacles: obstacles).placements.compactMap { placement in
-            byID[placement.id].map { (placement, $0.color, $0.variants[0]) }
+            byID[placement.id].map { (placement, $0.color, $0.variants[0], $0.icon, $0.iconColor) }
         }
     }
 
@@ -876,9 +954,14 @@ struct PlanUsageWindow: View {
     }
 
     /// `x` should be the reset's position when the run-out falls after it.
-    private func runoutLabel(id: String, names: [String], depletion: Date, reset: Date, window: String, x: Double, tint: Color, marker: String = "") -> PlanUsageChartLabel {
+    private func runoutLabel(id: String, names: [String], depletion: Date, reset: Date, window: String, x: Double, tint: Color, iconTint: Color, marker: String = "") -> PlanUsageChartLabel {
         .init(id: id, variants: runoutVariants(names, depletion: depletion, reset: reset, window: window, marker: marker), x: x, band: .bottom,
-              color: depletion > reset ? tint.opacity(0.7) : tint)
+              color: tint, icon: .runout(filled: depletion <= reset), iconColor: iconTint)
+    }
+
+    /// Label text in Both follows its line: weekly a little lighter (light) / darker (dark), still readable.
+    private func bothLabelTint(_ id: String, _ window: String) -> Color {
+        isSession(window) ? color(id) : Self.receded(baseColor(id), by: 0.2)
     }
 
     private func nowLabel(_ x: Double) -> PlanUsageChartLabel {
@@ -899,13 +982,14 @@ struct PlanUsageWindow: View {
     private func singleLabels(id: String, window: String, graph: PlanUsageGraph, previous: PlanUsageGraph?, forecast: PlanUsageRunoutForecast?, now: Date) -> PlanUsageChartAnnotations {
         var output = PlanUsageChartAnnotations(dateAxis: true)
         output.labels.append(nowLabel(now.timeIntervalSince1970))
-        output.labels.append(.init(id: "reset", variants: resetVariants(["Resets"], reset: graph.reset, window: window, now: now), x: graph.reset.timeIntervalSince1970, band: .top, color: color(id)))
+        output.labels.append(.init(id: "reset", variants: resetVariants(["Resets"], reset: graph.reset, window: window, now: now), x: graph.reset.timeIntervalSince1970, band: .top, color: color(id),
+                                   icon: .reset(filled: isSession(window)), iconColor: color(id)))
         if let depletion = forecast?.depletionDate {
-            output.labels.append(runoutLabel(id: "out", names: [""], depletion: depletion, reset: graph.reset, window: window, x: min(depletion, graph.reset).timeIntervalSince1970, tint: color(id)))
+            output.labels.append(runoutLabel(id: "out", names: [""], depletion: depletion, reset: graph.reset, window: window, x: min(depletion, graph.reset).timeIntervalSince1970, tint: color(id), iconTint: color(id)))
         }
         let tags = tagVariants([""], graph: graph)
         if tags != [""] {
-            output.labels.append(.init(id: "tag", variants: tags, x: graph.last.date.timeIntervalSince1970, y: graph.last.remaining, band: nil, color: color(id)))
+            output.labels.append(.init(id: "tag", variants: tags, x: graph.last.date.timeIntervalSince1970, y: graph.last.remaining, band: nil, color: color(id), icon: .line, iconColor: color(id)))
             output.markers.append((graph.last.date.timeIntervalSince1970, graph.last.remaining))
         }
         return output
@@ -917,19 +1001,20 @@ struct PlanUsageWindow: View {
             output.labels.append(nowLabel(now.timeIntervalSince1970))
             for (id, graph) in graphs {
                 let name = id.capitalized
-                output.labels.append(.init(id: id + "-reset", variants: resetVariants(["\(name) resets", name], reset: graph.reset, window: window, now: now), x: graph.reset.timeIntervalSince1970, band: .top, color: color(id)))
+                output.labels.append(.init(id: id + "-reset", variants: resetVariants(["\(name) resets", name], reset: graph.reset, window: window, now: now), x: graph.reset.timeIntervalSince1970, band: .top, color: color(id),
+                                           icon: .reset(filled: isSession(window)), iconColor: color(id)))
                 output.markers += [(graph.reset.timeIntervalSince1970, 100), (graph.start.timeIntervalSince1970, 100)]
             }
             for (id, graph) in graphs {
                 guard let depletion = runoutForecast(graph)?.depletionDate else { continue }
-                output.labels.append(runoutLabel(id: id + "-out", names: [id.capitalized, ""], depletion: depletion, reset: graph.reset, window: window, x: min(depletion, graph.reset).timeIntervalSince1970, tint: color(id)))
+                output.labels.append(runoutLabel(id: id + "-out", names: [id.capitalized, ""], depletion: depletion, reset: graph.reset, window: window, x: min(depletion, graph.reset).timeIntervalSince1970, tint: color(id), iconTint: color(id)))
                 output.markers.append((min(depletion, graph.reset).timeIntervalSince1970, 0))
             }
         }
         for (id, graph) in graphs {
             let x = position(graph.last.date, graph: graph)
-            // The colour key above the chart names the lines; the point label states its value.
-            output.labels.append(.init(id: id + "-tag", variants: tagVariants([percentLeft(graph)], graph: graph), x: x, y: graph.last.remaining, band: nil, color: color(id)))
+            // The leading mark ties the label to its line; name first, then the value.
+            output.labels.append(.init(id: id + "-tag", variants: tagVariants(["\(id.capitalized) \(percentLeft(graph))", percentLeft(graph)], graph: graph), x: x, y: graph.last.remaining, band: nil, color: color(id), icon: .line, iconColor: color(id)))
             output.markers.append((x, graph.last.remaining))
         }
         return output
@@ -942,13 +1027,15 @@ struct PlanUsageWindow: View {
             output.labels.append(nowLabel(focus.position(now)))
             for item in entries {
                 let name = item.provider.capitalized
-                output.labels.append(.init(id: item.id + "-reset", variants: resetVariants(["\(name) \(short(item.window)) resets", "\(name) \(short(item.window))"], reset: item.graph.reset, window: item.window, now: now, marker: short(item.window) + " "), x: focus.position(item.graph.reset), band: .top, color: color(item.provider)))
+                output.labels.append(.init(id: item.id + "-reset", variants: resetVariants(["\(name) \(short(item.window)) resets", "\(name) \(short(item.window))"], reset: item.graph.reset, window: item.window, now: now, marker: short(item.window) + " "), x: focus.position(item.graph.reset), band: .top,
+                                           color: bothLabelTint(item.provider, item.window), icon: .reset(filled: isSession(item.window)), iconColor: bothTint(item.provider, item.window)))
                 output.markers += [(focus.position(item.graph.reset), 100), (focus.position(item.graph.start), 100)]
             }
             for item in entries {
                 guard let depletion = runoutForecast(item.graph)?.depletionDate else { continue }
                 let name = item.provider.capitalized
-                output.labels.append(runoutLabel(id: item.id + "-out", names: ["\(name) \(short(item.window))", short(item.window)], depletion: depletion, reset: item.graph.reset, window: item.window, x: focus.position(min(depletion, item.graph.reset)), tint: color(item.provider), marker: short(item.window) + " "))
+                output.labels.append(runoutLabel(id: item.id + "-out", names: ["\(name) \(short(item.window))", short(item.window)], depletion: depletion, reset: item.graph.reset, window: item.window, x: focus.position(min(depletion, item.graph.reset)),
+                                                 tint: bothLabelTint(item.provider, item.window), iconTint: bothTint(item.provider, item.window), marker: short(item.window) + " "))
                 output.markers.append((focus.position(min(depletion, item.graph.reset)), 0))
             }
         }
@@ -957,7 +1044,8 @@ struct PlanUsageWindow: View {
             let name = item.provider.capitalized
             let base = item.window == "session" ? ["\(name) · 5h", "\(name) 5h"] : ["\(name) · Weekly", "\(name) wk"]
             let variants = tagVariants(base, graph: item.graph)
-            output.labels.append(.init(id: item.id + "-tag", variants: variants, x: x, y: item.graph.last.remaining, band: nil, color: color(item.provider)))
+            output.labels.append(.init(id: item.id + "-tag", variants: variants, x: x, y: item.graph.last.remaining, band: nil,
+                                       color: bothLabelTint(item.provider, item.window), icon: .line, iconColor: bothTint(item.provider, item.window)))
             output.markers.append((x, item.graph.last.remaining))
         }
         return output
