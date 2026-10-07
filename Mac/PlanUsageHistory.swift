@@ -241,12 +241,28 @@ struct PlanUsageGraph: Equatable {
         self.samples = segment.map { Sample(date: $0.capturedAt, remaining: min(100, max(0, 100 - $0.usedPercent))) }
     }
 
-    /// The most recent window that ended at or before `current` started. Forecasts never use it.
+    /// The window captured immediately before `current`, even if it was reset early, so its
+    /// scheduled reset can lie after `current.start`. Idle windows (0% used throughout) are
+    /// skipped: Codex reports a rolling reset for them, so they are not real windows.
+    /// Display context only; forecasts never use it.
     static func previous(series: PlanUsageSeries, before current: PlanUsageGraph) -> PlanUsageGraph? {
-        let cutoff = current.start.addingTimeInterval(120)
-        guard let reset = series.entries.compactMap(\.resetsAt)
-            .filter({ $0 <= cutoff && abs($0.timeIntervalSince(current.reset)) > 120 }).max() else { return nil }
-        return PlanUsageGraph(series: series, finishedAt: reset)
+        let boundary = current.start.addingTimeInterval(120)
+        var tried: [Date] = []
+        for entry in sorted(series.entries).reversed() where entry.capturedAt <= boundary {
+            guard let reset = entry.resetsAt, abs(reset.timeIntervalSince(current.reset)) > 120,
+                  !tried.contains(where: { abs($0.timeIntervalSince(reset)) <= 120 }) else { continue }
+            tried.append(reset)
+            if let window = PlanUsageGraph(series: series, finishedAt: reset), window.samples.contains(where: { $0.remaining < 100 }) {
+                return window
+            }
+            if tried.count >= 64 { break }
+        }
+        return nil
+    }
+
+    /// The scheduled reset lay after `next` began: the provider reset this window early.
+    func resetEarly(before next: PlanUsageGraph) -> Bool {
+        reset.timeIntervalSince(next.start) > 300
     }
 
     private static func sorted(_ entries: [PlanUsageEntry]) -> [PlanUsageEntry] {

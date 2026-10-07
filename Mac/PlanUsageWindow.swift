@@ -137,15 +137,25 @@ struct PlanUsageWindow: View {
         guard let series = histories[id]?.first(where: { $0.name == (window ?? lane) }) else { return nil }
         return PlanUsageGraph(series: series, now: now)
     }
-    /// The finished window before `current`, shown faintly while the current session is in its
-    /// first half so a fresh reset still has recorded context. Display only: forecasts ignore it.
+    /// The window before `current` (session or weekly), shown faintly while the current one is in
+    /// its first half so a fresh or early reset still has recorded context. Display only.
     private func previousGraph(_ id: String, window: String, current: PlanUsageGraph, now: Date) -> PlanUsageGraph? {
-        guard window == "session", let series = histories[id]?.first(where: { $0.name == window }) else { return nil }
+        guard ["session", "weekly"].contains(window),
+              let series = histories[id]?.first(where: { $0.name == window }) else { return nil }
         let duration = current.reset.timeIntervalSince(current.start)
         guard now.timeIntervalSince(current.start) < duration / 2,
               let previous = PlanUsageGraph.previous(series: series, before: current),
-              previous.reset >= current.start.addingTimeInterval(-duration) else { return nil }
+              previous.last.date >= current.start.addingTimeInterval(-duration) else { return nil }
         return previous
+    }
+
+    /// Rule where an early reset cut the previous window short; it sits at the current start.
+    @ChartContentBuilder
+    private func earlyResetRule<X: Plottable>(_ id: String, at x: X, previous: PlanUsageGraph, now: Date) -> some ChartContent {
+        RuleMark(x: .value("Reset early", x))
+            .foregroundStyle(color(id).opacity(0.6))
+            .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [3, 2]))
+            .accessibilityLabel("\(id.capitalized) reset early; was due \(ResetCountdown.absoluteDateTime(previous.reset, now: now))")
     }
 
     private func percentLeft(_ graph: PlanUsageGraph) -> String {
@@ -162,6 +172,19 @@ struct PlanUsageWindow: View {
                 .foregroundStyle(color(id).opacity(0.22)).lineStyle(StrokeStyle(lineWidth: 1.2))
         }
         .accessibilityLabel("\(id.capitalized) previous window")
+    }
+
+    /// Every window starts at 100% left, but the first capture can come up to an hour later.
+    /// A dotted segment joins the start marker to it: known start, path in between not recorded.
+    @ChartContentBuilder
+    private func startConnector<X: Plottable>(_ id: String, _ graph: PlanUsageGraph, x: @escaping (Date) -> X, yLabel: String) -> some ChartContent {
+        if let first = graph.samples.first, first.date.timeIntervalSince(graph.start) > 60 {
+            ForEach([PlanUsageGraph.Sample(date: graph.start, remaining: 100), first], id: \.date) { point in
+                LineMark(x: .value("Time", x(point.date)), y: .value(yLabel, point.remaining), series: .value("Series", id + " start connector"))
+                    .foregroundStyle(color(id).opacity(0.5)).lineStyle(StrokeStyle(lineWidth: 1.2, dash: [1, 3]))
+            }
+            .accessibilityHidden(true)
+        }
     }
 
     private func color(_ id: String) -> Color {
@@ -181,7 +204,8 @@ struct PlanUsageWindow: View {
             if let graph = graph(id, in: window, now: now) {
                 let timeZone = TimeZone.current
                 let forecast = runoutForecast(graph)
-                let axisEnd = max(graph.reset, forecast?.depletionDate ?? graph.reset)
+                // A run-out after reset never happens, so it must not stretch the axis.
+                let axisEnd = graph.reset
                 let previous = previousGraph(id, window: window, current: graph, now: now)
                 let axis = PlanUsageTimeAxis(start: min(graph.start, previous?.start ?? graph.start), end: axisEnd, timeZone: timeZone)
                 Chart {
@@ -189,6 +213,9 @@ struct PlanUsageWindow: View {
                         .foregroundStyle(.secondary.opacity(0.07)).accessibilityHidden(true)
                     if let previous {
                         previousWindowMarks(id, previous, x: { $0 }, yLabel: "Remaining")
+                        if previous.resetEarly(before: graph) {
+                            earlyResetRule(id, at: graph.start, previous: previous, now: now)
+                        }
                     }
                     PointMark(x: .value("Window start", graph.start), y: .value("Top", 100))
                         .symbol(.square).symbolSize(50).foregroundStyle(color(id))
@@ -205,15 +232,9 @@ struct PlanUsageWindow: View {
                             .foregroundStyle(color(id).opacity(0.55))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                         if let depletionDate = forecast.depletionDate, depletionDate > graph.reset {
-                            LineMark(x: .value("Time", graph.reset), y: .value("Remaining", forecast.remainingAtReset), series: .value("Series", "Hypothetical after reset"))
-                                .foregroundStyle(color(id).opacity(0.25))
-                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
-                            LineMark(x: .value("Time", depletionDate), y: .value("Remaining", 0), series: .value("Series", "Hypothetical after reset"))
-                                .foregroundStyle(color(id).opacity(0.25))
-                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
-                            PointMark(x: .value("Projected depletion", depletionDate), y: .value("Remaining", 0))
+                            PointMark(x: .value("Lasts to reset", graph.reset), y: .value("Remaining", forecast.remainingAtReset))
                                 .symbol { afterResetSymbol(color(id)) }
-                                .accessibilityLabel("Projected depletion if pace continues beyond reset")
+                                .accessibilityLabel("Lasts to reset; projected run-out if pace continued beyond reset")
                                 .accessibilityValue(ResetCountdown.absoluteDateTime(depletionDate, now: now))
                         } else if let depletionDate = forecast.depletionDate {
                             PointMark(x: .value("Projected depletion", depletionDate), y: .value("Remaining", 0))
@@ -222,6 +243,7 @@ struct PlanUsageWindow: View {
                                 .accessibilityValue(ResetCountdown.absoluteDateTime(depletionDate, now: now))
                         }
                     }
+                    startConnector(id, graph, x: { $0 }, yLabel: "Remaining")
                     ForEach(graph.samples, id: \.date) { point in
                         LineMark(x: .value("Time", point.date), y: .value("Remaining", point.remaining), series: .value("Series", "Recorded"))
                             .foregroundStyle(color(id)).lineStyle(StrokeStyle(lineWidth: 2))
@@ -305,10 +327,10 @@ struct PlanUsageWindow: View {
     }
 
     @ChartContentBuilder
-    private func runoutPoint(id: String, window: String, date: Date, now: Date, plotPosition: Double? = nil, afterReset: Bool = false) -> some ChartContent {
+    private func runoutPoint(id: String, window: String, date: Date, now: Date, plotPosition: Double? = nil, remaining: Double = 0, afterReset: Bool = false) -> some ChartContent {
         let time = ResetCountdown.absoluteDateTime(date, now: now)
         let xValue: PlottableValue<Double> = .value("Run-out", plotPosition ?? date.timeIntervalSince1970)
-        let yValue: PlottableValue<Double> = .value("Remaining", 0.0)
+        let yValue: PlottableValue<Double> = .value("Remaining", remaining)
         if afterReset {
             PointMark(x: xValue, y: yValue)
                 .symbol { afterResetSymbol(color(id)) }
@@ -377,9 +399,8 @@ struct PlanUsageWindow: View {
     /// `earliest` widens the axis for display-only context such as a previous window.
     private func timelineAxis(_ graphs: [(String, PlanUsageGraph)], earliest: Date? = nil) -> PlanUsageTimeAxis {
         let start = (graphs.map { $0.1.start } + [earliest].compactMap { $0 }).min() ?? .now
-        let reset = graphs.map { $0.1.reset }.max() ?? start.addingTimeInterval(1)
-        let projected = graphs.compactMap { runoutForecast($0.1)?.depletionDate }.max() ?? reset
-        let end = max(reset, projected)
+        // Run-outs before reset fall inside the window; ones after reset never happen.
+        let end = graphs.map { $0.1.reset }.max() ?? start.addingTimeInterval(1)
         return PlanUsageTimeAxis(start: start, end: end, timeZone: .current)
     }
 
@@ -388,8 +409,7 @@ struct PlanUsageWindow: View {
             .compactMap { id, window in graph(id, in: window, now: now).map { PlanUsageWindowGraph(provider: id, window: window, graph: $0) } }
         let earliest = entries.map { $0.graph.start }.min() ?? now.addingTimeInterval(-1)
         let latestReset = entries.map { $0.graph.reset }.max() ?? now.addingTimeInterval(1)
-        let latestDepletion = entries.compactMap { runoutForecast($0.graph)?.depletionDate }.max() ?? latestReset
-        let axis = PlanUsageTimeAxis(start: earliest, end: max(latestReset, latestDepletion), timeZone: .current)
+        let axis = PlanUsageTimeAxis(start: earliest, end: latestReset, timeZone: .current)
         let sessions = entries.filter { $0.window == "session" }
         let sessionStart = min(sessions.map { $0.graph.start }.min() ?? now, now.addingTimeInterval(-3 * 3600))
         let sessionEnd = max(sessions.map { $0.graph.reset }.max() ?? now, now.addingTimeInterval(3 * 3600))
@@ -434,14 +454,17 @@ struct PlanUsageWindow: View {
                             let remaining = forecast.pace.remainingPercent(at: end, observedAt: graph.last.date) ?? graph.last.remaining
                             focusedLine([graph.last, .init(date: end, remaining: remaining)], series: "Forecast " + item.id, axis: focus, tint: color(id).opacity(0.62), stroke: StrokeStyle(lineWidth: 1.2, dash: quotaWindow == "session" ? [4, 3] : [2, 3]))
                             if let depletion = forecast.depletionDate {
-                                let depletionRemaining = forecast.pace.remainingPercent(at: depletion, observedAt: graph.last.date) ?? 0
-                                if depletion > graph.reset {
-                                    focusedLine([.init(date: graph.reset, remaining: forecast.remainingAtReset), .init(date: depletion, remaining: depletionRemaining)], series: "After reset " + item.id, axis: focus, tint: color(id).opacity(0.28), stroke: StrokeStyle(lineWidth: 1, dash: [2, 4]))
-                                }
-                                runoutPoint(id: id, window: quotaWindow, date: depletion, now: now, plotPosition: focus.position(depletion), afterReset: depletion > graph.reset)
+                                let afterReset = depletion > graph.reset
+                                runoutPoint(id: id, window: quotaWindow, date: depletion, now: now,
+                                            plotPosition: focus.position(afterReset ? graph.reset : depletion),
+                                            remaining: afterReset ? forecast.remainingAtReset : 0, afterReset: afterReset)
                             }
                         }
 
+                        if !normalized, let first = graph.samples.first, first.date.timeIntervalSince(graph.start) > 60 {
+                            focusedLine([.init(date: graph.start, remaining: 100), first], series: "Start " + item.id, axis: focus,
+                                        tint: color(id).opacity(0.5), stroke: StrokeStyle(lineWidth: 1.2, dash: [1, 3]))
+                        }
                         ForEach(normalized ? graph.samples : focus.vertices(graph.samples), id: \.date) { point in
                             LineMark(x: .value("Time", normalized ? graph.progress(point.date) : focus.position(point.date)), y: .value("Remaining", point.remaining), series: .value("Quota", item.id))
                                 .foregroundStyle(color(id))
@@ -565,8 +588,11 @@ struct PlanUsageWindow: View {
                 if !normalized {
                     RectangleMark(xStart: .value("Forecast", now.timeIntervalSince1970), xEnd: .value("Forecast", axis.plotEnd.timeIntervalSince1970), yStart: .value("Bottom", 0.0), yEnd: .value("Top", 100.0))
                         .foregroundStyle(.secondary.opacity(0.07)).accessibilityHidden(true)
-                    ForEach(previous, id: \.0) { id, graph in
-                        previousWindowMarks(id, graph, x: { $0.timeIntervalSince1970 }, yLabel: "Remaining %")
+                    ForEach(previous, id: \.0) { id, prior in
+                        previousWindowMarks(id, prior, x: { $0.timeIntervalSince1970 }, yLabel: "Remaining %")
+                        if let current = graphs.first(where: { $0.0 == id })?.1, prior.resetEarly(before: current) {
+                            earlyResetRule(id, at: current.start.timeIntervalSince1970, previous: prior, now: now)
+                        }
                     }
                 }
                 if normalized {
@@ -595,15 +621,9 @@ struct PlanUsageWindow: View {
                             .foregroundStyle(color(id).opacity(0.55))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                         if let depletion = forecast.depletionDate, depletion > graph.reset {
-                            LineMark(x: .value("Time", graph.reset.timeIntervalSince1970), y: .value("Remaining %", forecast.remainingAtReset), series: .value("Series", id + " hypothetical after reset"))
-                                .foregroundStyle(color(id).opacity(0.24))
-                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
-                            LineMark(x: .value("Time", depletion.timeIntervalSince1970), y: .value("Remaining %", 0), series: .value("Series", id + " hypothetical after reset"))
-                                .foregroundStyle(color(id).opacity(0.24))
-                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
-                            PointMark(x: .value("Projected depletion", depletion.timeIntervalSince1970), y: .value("Remaining %", 0))
+                            PointMark(x: .value("Lasts to reset", graph.reset.timeIntervalSince1970), y: .value("Remaining %", forecast.remainingAtReset))
                                 .symbol { afterResetSymbol(color(id)) }
-                                .accessibilityLabel("\(id.capitalized) projected depletion if pace continues beyond reset")
+                                .accessibilityLabel("\(id.capitalized) lasts to reset; projected run-out if pace continued beyond reset")
                                 .accessibilityValue(ResetCountdown.absoluteDateTime(depletion, now: now))
                         } else if let depletion = forecast.depletionDate {
                             PointMark(x: .value("Projected depletion", depletion.timeIntervalSince1970), y: .value("Remaining %", 0))
@@ -637,6 +657,9 @@ struct PlanUsageWindow: View {
                     }
                 }
                 ForEach(graphs, id: \.0) { id, graph in
+                    if !normalized {
+                        startConnector(id, graph, x: { $0.timeIntervalSince1970 }, yLabel: "Remaining %")
+                    }
                     ForEach(graph.samples, id: \.date) { point in
                         LineMark(x: .value("Elapsed window %", position(point.date, graph: graph)), y: .value("Remaining %", point.remaining), series: .value("Provider", id))
                             .foregroundStyle(color(id)).lineStyle(StrokeStyle(lineWidth: 2))
@@ -720,7 +743,7 @@ struct PlanUsageWindow: View {
 
     /// What happens next for one quota window, in words.
     private func outlook(_ forecast: PlanUsageRunoutForecast?, graph: PlanUsageGraph, window: String, now: Date) -> (text: String, known: Bool) {
-        let time: (Date) -> String = { window == "session" ? shortTime($0) : resetPlotTime($0, window: "weekly") }
+        let time: (Date) -> String = { runoutTime($0, window: window, now: now) }
         if isUnused(graph) { return (forecast == nil ? "No usage yet" : "No usage yet · lasts through reset", forecast != nil) }
         guard let forecast else { return ("Waiting for enough usage to estimate", false) }
         guard let depletion = forecast.depletionDate else { return ("Lasts through reset", true) }
@@ -835,16 +858,24 @@ struct PlanUsageWindow: View {
     /// `names` run from most to least specific; "" means no provider prefix.
     /// A run-out after reset is presented as lasting to reset, with its time only while it fits.
     private func runoutVariants(_ names: [String], depletion: Date, reset: Date, window: String, marker: String = "") -> [String] {
-        let time = window == "session" ? shortTime(depletion) : resetPlotTime(depletion, window: "weekly")
+        let time = runoutTime(depletion, window: window, now: .now)
         func phrase(_ name: String, _ text: String) -> String {
             name.isEmpty ? text.prefix(1).uppercased() + text.dropFirst() : "\(name) \(text)"
         }
         guard depletion > reset else {
-            return Self.dedupe(names.map { phrase($0, "out \(time)") } + [marker + time])
+            return Self.dedupe([phrase(names[0], "runs out \(time)")] + names.map { phrase($0, "out \(time)") } + [marker + time])
         }
-        return Self.dedupe([phrase(names[0], "lasts to reset · out \(time)")] + names.map { phrase($0, "lasts to reset") })
+        // The hypothetical run-out date lives in the summary row, not on the chart.
+        return Self.dedupe(names.map { phrase($0, "lasts to reset") })
     }
 
+    /// Time for a run-out label; far-off hypothetical run-outs carry their date, not just a weekday.
+    private func runoutTime(_ date: Date, window: String, now: Date) -> String {
+        if date.timeIntervalSince(now) > 6 * 86400 { return date.formatted(.dateTime.month(.abbreviated).day().hour().minute()) }
+        return window == "session" ? shortTime(date) : resetPlotTime(date, window: "weekly")
+    }
+
+    /// `x` should be the reset's position when the run-out falls after it.
     private func runoutLabel(id: String, names: [String], depletion: Date, reset: Date, window: String, x: Double, tint: Color, marker: String = "") -> PlanUsageChartLabel {
         .init(id: id, variants: runoutVariants(names, depletion: depletion, reset: reset, window: window, marker: marker), x: x, band: .bottom,
               color: depletion > reset ? tint.opacity(0.7) : tint)
@@ -868,9 +899,9 @@ struct PlanUsageWindow: View {
     private func singleLabels(id: String, window: String, graph: PlanUsageGraph, previous: PlanUsageGraph?, forecast: PlanUsageRunoutForecast?, now: Date) -> PlanUsageChartAnnotations {
         var output = PlanUsageChartAnnotations(dateAxis: true)
         output.labels.append(nowLabel(now.timeIntervalSince1970))
-        output.labels.append(.init(id: "reset", variants: resetVariants(["Reset"], reset: graph.reset, window: window, now: now), x: graph.reset.timeIntervalSince1970, band: .top, color: color(id)))
+        output.labels.append(.init(id: "reset", variants: resetVariants(["Resets"], reset: graph.reset, window: window, now: now), x: graph.reset.timeIntervalSince1970, band: .top, color: color(id)))
         if let depletion = forecast?.depletionDate {
-            output.labels.append(runoutLabel(id: "out", names: [""], depletion: depletion, reset: graph.reset, window: window, x: depletion.timeIntervalSince1970, tint: color(id)))
+            output.labels.append(runoutLabel(id: "out", names: [""], depletion: depletion, reset: graph.reset, window: window, x: min(depletion, graph.reset).timeIntervalSince1970, tint: color(id)))
         }
         let tags = tagVariants([""], graph: graph)
         if tags != [""] {
@@ -886,13 +917,13 @@ struct PlanUsageWindow: View {
             output.labels.append(nowLabel(now.timeIntervalSince1970))
             for (id, graph) in graphs {
                 let name = id.capitalized
-                output.labels.append(.init(id: id + "-reset", variants: resetVariants(["\(name) reset", name], reset: graph.reset, window: window, now: now), x: graph.reset.timeIntervalSince1970, band: .top, color: color(id)))
+                output.labels.append(.init(id: id + "-reset", variants: resetVariants(["\(name) resets", name], reset: graph.reset, window: window, now: now), x: graph.reset.timeIntervalSince1970, band: .top, color: color(id)))
                 output.markers += [(graph.reset.timeIntervalSince1970, 100), (graph.start.timeIntervalSince1970, 100)]
             }
             for (id, graph) in graphs {
                 guard let depletion = runoutForecast(graph)?.depletionDate else { continue }
-                output.labels.append(runoutLabel(id: id + "-out", names: [id.capitalized, ""], depletion: depletion, reset: graph.reset, window: window, x: depletion.timeIntervalSince1970, tint: color(id)))
-                output.markers.append((depletion.timeIntervalSince1970, 0))
+                output.labels.append(runoutLabel(id: id + "-out", names: [id.capitalized, ""], depletion: depletion, reset: graph.reset, window: window, x: min(depletion, graph.reset).timeIntervalSince1970, tint: color(id)))
+                output.markers.append((min(depletion, graph.reset).timeIntervalSince1970, 0))
             }
         }
         for (id, graph) in graphs {
@@ -911,14 +942,14 @@ struct PlanUsageWindow: View {
             output.labels.append(nowLabel(focus.position(now)))
             for item in entries {
                 let name = item.provider.capitalized
-                output.labels.append(.init(id: item.id + "-reset", variants: resetVariants(["\(name) \(short(item.window)) reset", "\(name) \(short(item.window))"], reset: item.graph.reset, window: item.window, now: now, marker: short(item.window) + " "), x: focus.position(item.graph.reset), band: .top, color: color(item.provider)))
+                output.labels.append(.init(id: item.id + "-reset", variants: resetVariants(["\(name) \(short(item.window)) resets", "\(name) \(short(item.window))"], reset: item.graph.reset, window: item.window, now: now, marker: short(item.window) + " "), x: focus.position(item.graph.reset), band: .top, color: color(item.provider)))
                 output.markers += [(focus.position(item.graph.reset), 100), (focus.position(item.graph.start), 100)]
             }
             for item in entries {
                 guard let depletion = runoutForecast(item.graph)?.depletionDate else { continue }
                 let name = item.provider.capitalized
-                output.labels.append(runoutLabel(id: item.id + "-out", names: ["\(name) \(short(item.window))", short(item.window)], depletion: depletion, reset: item.graph.reset, window: item.window, x: focus.position(depletion), tint: color(item.provider), marker: short(item.window) + " "))
-                output.markers.append((focus.position(depletion), 0))
+                output.labels.append(runoutLabel(id: item.id + "-out", names: ["\(name) \(short(item.window))", short(item.window)], depletion: depletion, reset: item.graph.reset, window: item.window, x: focus.position(min(depletion, item.graph.reset)), tint: color(item.provider), marker: short(item.window) + " "))
+                output.markers.append((focus.position(min(depletion, item.graph.reset)), 0))
             }
         }
         for item in entries {

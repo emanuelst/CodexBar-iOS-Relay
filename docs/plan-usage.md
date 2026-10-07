@@ -50,3 +50,13 @@ One key line explains the marks: start, reset, Now, shaded forecast, and the fai
 ### Combined chart labels
 
 Combined Session and Weekly stay one overlaid chart. A colour key in the chart header (● Codex ● Claude) names the lines. Each latest point is labelled with its value in the provider colour ("65%", or "100% · no usage yet") instead of a floating provider-name pill. Reset and run-out labels sit away from the lines, so they keep the provider name.
+
+### Early resets and the axis end
+
+A window's chart ends at its reset. A projected run-out after the reset never happens, so it no longer stretches the axis. Before this, a fresh week with 1% used pushed the Weekly axis about a month out. Instead, a hollow marker at the reset shows the projected remaining % ("lasts to reset"), and the hypothetical date stays in the label and the summary.
+
+The previous window (Session and Weekly, while the current window is in its first half) is now the window captured immediately before the current one. That includes a window the provider reset early, whose scheduled reset lies after the new start. For example, Codex replaced a 70%-used week at 05:37 on Oct 7, 2.5 days before it was due. In that case, a faint dashed rule marks where it was cut off. Idle windows (0% throughout) are skipped. Codex reports a rolling reset time for them, so they are not real windows.
+
+Event labels share one pattern: "<Provider> resets <when>" in the top lanes, and "<Provider> runs out <when>" or "<Provider> lasts to reset" in the bottom lanes. Both adds "5h"/"wk". The hypothetical after-reset date appears only in the summary row.
+
+Every window starts at 100% left, but CodexBar captures roughly hourly, so the first recorded point can come up to an hour after the start marker. A faint dotted segment joins the start marker to the first capture (actual-time views only). This shows the known starting value without implying a recorded path in between.

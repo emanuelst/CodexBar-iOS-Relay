@@ -103,6 +103,22 @@ import Foundation
         let finished = PlanUsageGraph.previous(series: history, before: fresh)!
         precondition(finished.reset == oldReset && finished.samples.map(\.remaining) == [60, 10])
         precondition(PlanUsageGraph.previous(series: PlanUsageSeries(name: "session", windowMinutes: 300, entries: [history.entries[2]]), before: fresh) == nil)
-        print("Plan Usage checks passed: actual-time ticks and DST day boundaries, recorded endpoints, normalized progress, expired/future/missing windows, reset segments, duplicate captures, account isolation, date precision, previous window")
+        // Early reset (overnight Codex case): old week due later than the new start, idle windows skipped.
+        let earlyNew = now.addingTimeInterval(-3600)                    // new week started an hour ago
+        let oldDue = earlyNew.addingTimeInterval(2.5 * 86400)          // old week was due 2.5 days later
+        let idleReset = now.addingTimeInterval(-86400 * 9)             // an idle, rolling pseudo-window before that
+        let weekly = PlanUsageSeries(name: "weekly", windowMinutes: 10080, entries: [
+            PlanUsageEntry(capturedAt: idleReset.addingTimeInterval(-600), usedPercent: 0, resetsAt: idleReset),
+            PlanUsageEntry(capturedAt: earlyNew.addingTimeInterval(-86400), usedPercent: 40, resetsAt: oldDue),
+            PlanUsageEntry(capturedAt: earlyNew.addingTimeInterval(-480), usedPercent: 70, resetsAt: oldDue),
+            PlanUsageEntry(capturedAt: earlyNew.addingTimeInterval(-60), usedPercent: 0, resetsAt: earlyNew.addingTimeInterval(7 * 86400 - 60)),
+            PlanUsageEntry(capturedAt: now.addingTimeInterval(-60), usedPercent: 1, resetsAt: earlyNew.addingTimeInterval(7 * 86400))])
+        let newWeek = PlanUsageGraph(series: weekly, now: now)!
+        let oldWeek = PlanUsageGraph.previous(series: weekly, before: newWeek)!
+        precondition(oldWeek.reset == oldDue && oldWeek.samples.map(\.remaining) == [60, 30], "picks the early-reset week")
+        precondition(oldWeek.resetEarly(before: newWeek) && !finished.resetEarly(before: fresh))
+        let idleOnly = PlanUsageSeries(name: "weekly", windowMinutes: 10080, entries: [weekly.entries[0], weekly.entries[4]])
+        precondition(PlanUsageGraph.previous(series: idleOnly, before: PlanUsageGraph(series: idleOnly, now: now)!) == nil, "idle windows are not context")
+        print("Plan Usage checks passed: actual-time ticks and DST day boundaries, recorded endpoints, normalized progress, expired/future/missing windows, reset segments, duplicate captures, account isolation, date precision, previous window, early reset")
     }
 }

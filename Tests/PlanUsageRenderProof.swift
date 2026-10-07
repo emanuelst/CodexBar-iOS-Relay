@@ -29,6 +29,11 @@ import SwiftUI
         let finished = history("session", 300, -120, [10, 30, 55, 80, 97])
         let current = history("session", 300, 300 * 60 - 120, [0], fresh: true)
         fresh["codex"]![0] = PlanUsageSeries(name: "session", windowMinutes: 300, entries: finished.entries + current.entries)
+        // Early weekly reset: the old week (due in 2.5 days, 70% used) was replaced an hour ago.
+        let cutWeek = history("weekly", 10080, 2.5 * 86400 + 3600, [15, 30, 55, 70])
+        let newWeek = history("weekly", 10080, 7 * 86400 - 3600, [0, 1], fresh: true)
+        fresh["codex"]![1] = PlanUsageSeries(name: "weekly", windowMinutes: 10080,
+                                             entries: cutWeek.entries.filter { $0.capturedAt < now.addingTimeInterval(-3600) } + newWeek.entries)
         if CommandLine.arguments.contains("--recorded") {
             let reader = PlanUsageHistoryReader()
             fixture = ["codex": reader.read(provider: "codex"), "claude": reader.read(provider: "claude")]
@@ -47,7 +52,8 @@ import SwiftUI
                 ("collision-weekly", "Combined", false, "weekly"),
                 ("collision-both", "Combined", false, "both"), ("collision-both-small", "Combined", false, "both"),
                 ("fresh-session", "Combined", false, "session"), ("fresh-both", "Combined", false, "both"),
-                ("fresh-codex", "Codex", false, "session")
+                ("fresh-codex", "Codex", false, "session"),
+                ("fresh-weekly", "Combined", false, "weekly"), ("fresh-codex-weekly", "Codex", false, "weekly")
             ] {
                 let synthetic = name.hasPrefix("collision") ? collision : name.hasPrefix("fresh") ? fresh : fixture
                 let data = CommandLine.arguments.contains("--recorded") ? fixture : synthetic
