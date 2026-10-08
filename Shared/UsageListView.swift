@@ -99,8 +99,12 @@ public struct ProviderRow: View {
                     .foregroundStyle(percentColor(displayed, showUsed: showUsed))
             }
             ProgressView(value: min(max(displayed, 0), 100), total: 100)
+                #if os(macOS)
+                .progressViewStyle(QuotaProgressStyle(color: percentColor(displayed, showUsed: showUsed)))
+                .accessibilityLabel(Text("\(label) \(showUsed ? "used" : "remaining")"))
+                .accessibilityValue(Text(percentageText(displayed, wholeNumberIfIntegral: label == "Primary" || label == "Secondary")))
+                #else
                 .tint(percentColor(displayed, showUsed: showUsed))
-                #if os(iOS)
                 .scaleEffect(y: 1.1)
                 #endif
             if let line = ResetCountdown.resetLine(for: limit, showAbsolute: showAbsolute, now: now) {
@@ -285,6 +289,30 @@ public struct ProviderRow: View {
         return ResetCountdown.absoluteDateTime(d, now: now)
     }
 }
+
+#if os(macOS)
+/// Draw the quota color explicitly instead of relying on the native control's accent tint.
+private struct QuotaProgressStyle: ProgressViewStyle {
+    let color: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        GeometryReader { geometry in
+            let fraction = min(max(configuration.fractionCompleted ?? 0, 0), 1)
+            Capsule()
+                .fill(Color.primary.opacity(0.06))
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(color)
+                        .frame(width: geometry.size.width * fraction)
+                }
+                .overlay {
+                    Capsule().strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+                }
+        }
+        .frame(height: 8)
+    }
+}
+#endif
 
 public struct UsageListView: View {
     public let payload: Payload?
