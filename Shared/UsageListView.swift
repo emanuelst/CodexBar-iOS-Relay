@@ -264,7 +264,13 @@ public struct ProviderRow: View {
     @ViewBuilder
     private func planDateLine(_ label: String, _ iso: String) -> some View {
         if let rendered = ResetCountdown.subscriptionDate(iso, now: now) {
-            Text("\(label) \(rendered)")
+            let countdown: String = {
+                // Date-only billing values have no exact time, so do not invent one.
+                guard iso.count > 10,
+                      let date = ResetCountdown.date(from: iso), date > now else { return "" }
+                return " · \(ResetCountdown.countdown(to: date, now: now))"
+            }()
+            Text("\(label) \(rendered)\(countdown)")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
