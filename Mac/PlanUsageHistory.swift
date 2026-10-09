@@ -374,7 +374,25 @@ struct PlanUsageAnnotationLayout {
 
     /// Labels are placed in array order (priority). Each pass tries every lane/offset before
     /// shortening; if any label is dropped, the next pass starts every label one variant shorter.
+    /// Top lanes, bottom lanes and floating labels never share space, so each group is solved on
+    /// its own: a crowded group shortens only its own labels.
     func solve(_ labels: [Label], obstacles: [CGRect] = []) -> Result {
+        func group(_ label: Label) -> Int {
+            switch label.kind {
+            case .lane(.top): return 0
+            case .lane(.bottom): return 1
+            case .floating: return 2
+            }
+        }
+        let results = (0...2).map { key in solveGroup(labels.filter { group($0) == key }, obstacles: obstacles) }
+        let placed = Dictionary(uniqueKeysWithValues: results.flatMap(\.placements).map { ($0.id, $0) })
+        let dropped = Set(results.flatMap(\.dropped))
+        // Keep the caller's priority order in the merged result.
+        return Result(placements: labels.compactMap { placed[$0.id] }, dropped: labels.map(\.id).filter(dropped.contains))
+    }
+
+    private func solveGroup(_ labels: [Label], obstacles: [CGRect]) -> Result {
+        guard !labels.isEmpty else { return Result(placements: [], dropped: []) }
         let levels = max(1, labels.map(\.variants.count).max() ?? 1)
         var best: Result?
         for level in 0..<levels {

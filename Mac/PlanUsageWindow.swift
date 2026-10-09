@@ -551,7 +551,7 @@ struct PlanUsageWindow: View {
                     }
                 }
                 .chartXScale(domain: normalized ? 0...100 : 0...1)
-                .chartYScale(domain: 0...100, range: annotationRange(top: normalized ? 0 : 4, bottom: normalized ? 0 : 2))
+                .chartYScale(domain: 0...100, range: annotationRange(top: normalized ? 0 : 4, bottom: normalized ? 0 : 3))
                 .chartYAxis { AxisMarks(values: [0, 50, 100]) }
                 .chartXAxis {
                     AxisMarks(values: normalized ? [0, 25, 50, 75, 100] : ticks.map { focus.position($0) }) { value in
@@ -577,10 +577,10 @@ struct PlanUsageWindow: View {
                     }
                 }
                 .chartOverlay { proxy in
-                    annotationOverlay(bothLabels(entries, focus: focus, now: now), proxy: proxy, topLanes: normalized ? 0 : 4, bottomLanes: normalized ? 0 : 2)
+                    annotationOverlay(bothLabels(entries, focus: focus, now: now), proxy: proxy, topLanes: normalized ? 0 : 4, bottomLanes: normalized ? 0 : 3)
                 }
                 .chartLegend(.hidden)
-                .frame(height: normalized ? 300 : 380)
+                .frame(height: normalized ? 300 : 398)
             } else {
                 Text("Combined history is unavailable for the selected saved account.")
                     .font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120)
@@ -805,7 +805,7 @@ struct PlanUsageWindow: View {
         guard let forecast else { return ("Waiting for enough usage to estimate", false) }
         guard let depletion = forecast.depletionDate else { return ("Lasts through reset", true) }
         if forecast.extendsPastReset { return ("Lasts to reset · would run out \(time(depletion)) at this pace", true) }
-        return ("Out \(ResetCountdown.absoluteDateTime(depletion, now: now)) at this pace", true)
+        return ("Out \(ResetCountdown.absoluteDateTime(depletion, now: now)) · \(ResetCountdown.countdown(to: depletion, now: now)) at this pace", true)
     }
 
     /// One provider window: what is left and what happens next, then its exact times.
@@ -935,13 +935,16 @@ struct PlanUsageWindow: View {
 
     /// `names` run from most to least specific; "" means no provider prefix.
     /// A run-out after reset is presented as lasting to reset, with its time only while it fits.
-    private func runoutVariants(_ names: [String], depletion: Date, reset: Date, window: String, marker: String = "") -> [String] {
-        let time = runoutTime(depletion, window: window, now: .now)
+    /// Longest first. The countdown is the first thing dropped, so the provider name survives longest.
+    private func runoutVariants(_ names: [String], depletion: Date, reset: Date, window: String, now: Date, marker: String = "") -> [String] {
+        let time = runoutTime(depletion, window: window, now: now)
+        let countdown = " · " + ResetCountdown.countdown(to: depletion, now: now)
         func phrase(_ name: String, _ text: String) -> String {
             name.isEmpty ? text.prefix(1).uppercased() + text.dropFirst() : "\(name) \(text)"
         }
         guard depletion > reset else {
-            return Self.dedupe([phrase(names[0], "runs out \(time)")] + names.map { phrase($0, "out \(time)") } + [marker + time])
+            return Self.dedupe([phrase(names[0], "runs out \(time)\(countdown)"), phrase(names[0], "runs out \(time)")]
+                               + names.map { phrase($0, "out \(time)") } + [marker + time])
         }
         // The hypothetical run-out date lives in the summary row, not on the chart.
         return Self.dedupe(names.map { phrase($0, "lasts to reset") })
@@ -954,8 +957,8 @@ struct PlanUsageWindow: View {
     }
 
     /// `x` should be the reset's position when the run-out falls after it.
-    private func runoutLabel(id: String, names: [String], depletion: Date, reset: Date, window: String, x: Double, tint: Color, iconTint: Color, marker: String = "") -> PlanUsageChartLabel {
-        .init(id: id, variants: runoutVariants(names, depletion: depletion, reset: reset, window: window, marker: marker), x: x, band: .bottom,
+    private func runoutLabel(id: String, names: [String], depletion: Date, reset: Date, window: String, now: Date, x: Double, tint: Color, iconTint: Color, marker: String = "") -> PlanUsageChartLabel {
+        .init(id: id, variants: runoutVariants(names, depletion: depletion, reset: reset, window: window, now: now, marker: marker), x: x, band: .bottom,
               color: tint, icon: .runout(filled: depletion <= reset), iconColor: iconTint)
     }
 
@@ -985,7 +988,7 @@ struct PlanUsageWindow: View {
         output.labels.append(.init(id: "reset", variants: resetVariants(["Resets"], reset: graph.reset, window: window, now: now), x: graph.reset.timeIntervalSince1970, band: .top, color: color(id),
                                    icon: .reset(filled: isSession(window)), iconColor: color(id)))
         if let depletion = forecast?.depletionDate {
-            output.labels.append(runoutLabel(id: "out", names: [""], depletion: depletion, reset: graph.reset, window: window, x: min(depletion, graph.reset).timeIntervalSince1970, tint: color(id), iconTint: color(id)))
+            output.labels.append(runoutLabel(id: "out", names: [""], depletion: depletion, reset: graph.reset, window: window, now: now, x: min(depletion, graph.reset).timeIntervalSince1970, tint: color(id), iconTint: color(id)))
         }
         let tags = tagVariants([""], graph: graph)
         if tags != [""] {
@@ -1007,7 +1010,7 @@ struct PlanUsageWindow: View {
             }
             for (id, graph) in graphs {
                 guard let depletion = runoutForecast(graph)?.depletionDate else { continue }
-                output.labels.append(runoutLabel(id: id + "-out", names: [id.capitalized, ""], depletion: depletion, reset: graph.reset, window: window, x: min(depletion, graph.reset).timeIntervalSince1970, tint: color(id), iconTint: color(id)))
+                output.labels.append(runoutLabel(id: id + "-out", names: [id.capitalized, ""], depletion: depletion, reset: graph.reset, window: window, now: now, x: min(depletion, graph.reset).timeIntervalSince1970, tint: color(id), iconTint: color(id)))
                 output.markers.append((min(depletion, graph.reset).timeIntervalSince1970, 0))
             }
         }
@@ -1034,7 +1037,7 @@ struct PlanUsageWindow: View {
             for item in entries {
                 guard let depletion = runoutForecast(item.graph)?.depletionDate else { continue }
                 let name = item.provider.capitalized
-                output.labels.append(runoutLabel(id: item.id + "-out", names: ["\(name) \(short(item.window))", short(item.window)], depletion: depletion, reset: item.graph.reset, window: item.window, x: focus.position(min(depletion, item.graph.reset)),
+                output.labels.append(runoutLabel(id: item.id + "-out", names: ["\(name) \(short(item.window))", short(item.window)], depletion: depletion, reset: item.graph.reset, window: item.window, now: now, x: focus.position(min(depletion, item.graph.reset)),
                                                  tint: bothLabelTint(item.provider, item.window), iconTint: bothTint(item.provider, item.window), marker: short(item.window) + " "))
                 output.markers.append((focus.position(min(depletion, item.graph.reset)), 0))
             }

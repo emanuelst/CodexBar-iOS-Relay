@@ -90,9 +90,16 @@ import Foundation
         precondition(tagLayout.laneRect(.top, 0).minY > tagLayout.laneRect(.top, 2).minY)
         precondition(tagLayout.laneRect(.bottom, 1).maxY == wide.maxY)
 
+        // Groups are independent: a crowded top lane must not shorten bottom-lane labels.
+        let crowdedTop = (0..<3).map { lane("top\($0)", [String(repeating: "x", count: 40), "x"], wide.midX) }
+        let roomyBottom = lane("bottom", ["Claude wk runs out Sat 12:48 · in 2d 14h", "wk 12:48"], wide.midX, .bottom)
+        let mixed = Layout(plot: wide, topLanes: 1, bottomLanes: 1, measure: measure).solve(crowdedTop + [roomyBottom])
+        precondition(mixed.placements.first { $0.id == "bottom" }?.variant == 0, "bottom keeps its full text")
+        precondition(mixed.placements.map(\.id).first == "top0", "merged result keeps priority order")
+
         // Axis thinning keeps the first label and a minimum gap.
         precondition(Layout.thinned([0, 0.02, 0.05, 0.1, 0.12, 0.3], minimumGap: 0.085) == [0, 0.1, 0.3])
 
-        print("Plan Usage annotation layout checks passed: lane stacking, shortening, determinism, weekday retention, edge clamping, priority drops, floating tag avoidance, axis thinning")
+        print("Plan Usage annotation layout checks passed: lane stacking, shortening, determinism, weekday retention, edge clamping, priority drops, floating tag avoidance, independent groups, axis thinning")
     }
 }
