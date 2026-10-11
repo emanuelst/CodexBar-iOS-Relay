@@ -20,8 +20,8 @@ public struct ProviderRow: View {
             header
             if let usage = entry.usage {
                 if hasVisibleLimits(usage) {
-                    if let p = usage.primary { limitView("Primary", p); paceLine(for: p) }
-                    if let s = usage.secondary { limitView("Secondary", s); paceLine(for: s) }
+                    if let p = usage.primary { limitView(isSessionWeeklyProvider ? "Session" : "Primary", p); paceLine(for: p) }
+                    if let s = usage.secondary { limitView(isSessionWeeklyProvider ? "Weekly" : "Secondary", s); paceLine(for: s) }
                     if let t = usage.tertiary { limitView("Tertiary", t); paceLine(for: t) }
                     gptReserveView(usage.extraRateWindows)
                 } else {
@@ -73,6 +73,10 @@ public struct ProviderRow: View {
         }
     }
 
+    private var isSessionWeeklyProvider: Bool {
+        entry.provider == "codex" || entry.provider == "claude"
+    }
+
     private var visibleAccount: String? {
         guard !hidePersonalInfo else { return nil }
         return entry.usage?.accountEmail ?? entry.account
@@ -94,7 +98,7 @@ public struct ProviderRow: View {
             HStack {
                 Text(label).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Text(percentageText(displayed, wholeNumberIfIntegral: label == "Primary" || label == "Secondary"))
+                Text(percentageText(displayed, wholeNumberIfIntegral: label == "Primary" || label == "Secondary" || label == "Session" || label == "Weekly"))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(percentColor(displayed, showUsed: showUsed))
             }
@@ -102,7 +106,7 @@ public struct ProviderRow: View {
                 #if os(macOS)
                 .progressViewStyle(QuotaProgressStyle(color: percentColor(displayed, showUsed: showUsed)))
                 .accessibilityLabel(Text("\(label) \(showUsed ? "used" : "remaining")"))
-                .accessibilityValue(Text(percentageText(displayed, wholeNumberIfIntegral: label == "Primary" || label == "Secondary")))
+                .accessibilityValue(Text(percentageText(displayed, wholeNumberIfIntegral: label == "Primary" || label == "Secondary" || label == "Session" || label == "Weekly")))
                 #else
                 .tint(percentColor(displayed, showUsed: showUsed))
                 .scaleEffect(y: 1.1)
@@ -207,7 +211,7 @@ public struct ProviderRow: View {
             let expired = credit.cloudCreditExpired(at: now)
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Label("Cloud credits", systemImage: "cloud")
+                    Text("Cloud credits")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -217,10 +221,11 @@ public struct ProviderRow: View {
                 }
                 if let iso = credit.cloudCreditExpiry,
                    let absolute = ResetCountdown.absolute(from: iso, now: now) {
-                    Text("\(expired ? "expired" : "expires") \(absolute)")
-                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    let countdown = expired ? "" : ResetCountdown.countdown(from: iso, now: now).map { " · " + $0 } ?? ""
+                    Text("\(expired ? "expired" : "expires") \(absolute)\(countdown)")
+                        .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
                 } else if let note = credit.secondaryValue {
-                    Text(note).font(.caption2).foregroundStyle(.secondary)
+                    Text(note).font(.caption2).foregroundStyle(.tertiary)
                 }
             }
             .padding(.top, 2)
@@ -272,7 +277,7 @@ public struct ProviderRow: View {
             }()
             Text("\(label) \(rendered)\(countdown)")
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(label == "Plan renews" ? Color.blue : Color.secondary)
         }
     }
 
