@@ -21,6 +21,9 @@ import Foundation
         let estimated = ResetCountdown.estimatedSavedResetExpiry(expiry, capturedAt: now, timeZone: vienna)
         require(estimated == ResetCountdown.date(from: "2026-10-22T16:00:00Z"))
         require(ResetCountdown.estimatedSavedResetExpiry("Expires Oct 22 at 6:00 PM", capturedAt: now, timeZone: vienna) == estimated)
+        for time in ["6:00PM", "6:00\u{202F}PM", "6:00\u{00A0}PM"] {
+            require(ResetCountdown.estimatedSavedResetExpiry("Expires Oct 22 at " + time, capturedAt: now, timeZone: vienna) == estimated)
+        }
         require(ResetCountdown.estimatedSavedResetExpiry("Expires Feb 30 at 18:00", capturedAt: now, timeZone: vienna) == nil)
         require(ResetCountdown.estimatedSavedResetExpiry("Expires Oct 22 at 25:00", capturedAt: now, timeZone: vienna) == nil)
         require(ResetCountdown.estimatedSavedResetExpiry("Expires tomorrow", capturedAt: now, timeZone: vienna) == nil)

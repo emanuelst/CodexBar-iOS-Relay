@@ -84,7 +84,7 @@ public enum ResetCountdown {
     /// Anchor the inferred year to the original capture so an old offer cannot roll forward on redraw.
     public static func estimatedSavedResetExpiry(_ text: String, capturedAt: Date,
                                                  timeZone: TimeZone = .current) -> Date? {
-        let pattern = #"^Expires ([A-Za-z]{3}) ([0-9]{1,2}) at ([0-9]{1,2}):([0-9]{2})(?: (AM|PM))?$"#
+        let pattern = #"^Expires ([A-Za-z]{3}) ([0-9]{1,2}) at ([0-9]{1,2}):([0-9]{2})(?:\s*(AM|PM))?$"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
         func part(_ index: Int) -> String? {
