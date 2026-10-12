@@ -64,6 +64,12 @@ import Foundation
         precondition(shifted.samples.count == 1)
         let duplicate = graph([entry(600, 20), entry(600, 30)])!
         precondition(duplicate.samples.count == 1 && duplicate.last.remaining == 70)
+        // Hourly history may retain one point long after a window starts.
+        precondition(!duplicate.isNew(at: now))
+        precondition(duplicate.isNew(at: duplicate.start.addingTimeInterval(299)))
+        precondition(!duplicate.isNew(at: duplicate.start.addingTimeInterval(300)))
+        precondition(!duplicate.isNew(at: duplicate.start.addingTimeInterval(34 * 60)))
+        precondition(!duplicate.isNew(at: duplicate.start.addingTimeInterval(-1)))
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         let empty = "{\"version\":1,\"preferredAccountKey\":\"missing\",\"unscoped\":[],\"accounts\":{\"other\":[]}}"
         let document = try decoder.decode(PlanUsageHistoryDocument.self, from: Data(empty.utf8))

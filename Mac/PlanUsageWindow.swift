@@ -971,9 +971,9 @@ struct PlanUsageWindow: View {
         PlanUsageChartLabel(id: "now", variants: ["Now"], x: x, band: .top, color: .secondary)
     }
 
-    /// "no usage yet" for 0% used, otherwise "new window" for a single capture; longest first.
-    private func tagVariants(_ base: [String], graph: PlanUsageGraph) -> [String] {
-        let extras = isUnused(graph) ? ["no usage yet"] : graph.samples.count == 1 ? ["new window"] : []
+    /// "no usage yet" for 0% used, otherwise "new window" during the first five minutes.
+    private func tagVariants(_ base: [String], graph: PlanUsageGraph, now: Date) -> [String] {
+        let extras = isUnused(graph) ? ["no usage yet"] : graph.isNew(at: now) ? ["new window"] : []
         guard let head = base.first, !extras.isEmpty else { return base }
         func join(_ parts: [String]) -> String {
             let text = ([head] + parts).filter { !$0.isEmpty }.joined(separator: " · ")
@@ -990,7 +990,7 @@ struct PlanUsageWindow: View {
         if let depletion = forecast?.depletionDate {
             output.labels.append(runoutLabel(id: "out", names: [""], depletion: depletion, reset: graph.reset, window: window, now: now, x: min(depletion, graph.reset).timeIntervalSince1970, tint: color(id), iconTint: color(id)))
         }
-        let tags = tagVariants([""], graph: graph)
+        let tags = tagVariants([""], graph: graph, now: now)
         if tags != [""] {
             output.labels.append(.init(id: "tag", variants: tags, x: graph.last.date.timeIntervalSince1970, y: graph.last.remaining, band: nil, color: color(id), icon: .line, iconColor: color(id)))
             output.markers.append((graph.last.date.timeIntervalSince1970, graph.last.remaining))
@@ -1017,7 +1017,7 @@ struct PlanUsageWindow: View {
         for (id, graph) in graphs {
             let x = position(graph.last.date, graph: graph)
             // The leading mark ties the label to its line; name first, then the value.
-            output.labels.append(.init(id: id + "-tag", variants: tagVariants(["\(id.capitalized) \(percentLeft(graph))", percentLeft(graph)], graph: graph), x: x, y: graph.last.remaining, band: nil, color: color(id), icon: .line, iconColor: color(id)))
+            output.labels.append(.init(id: id + "-tag", variants: tagVariants(["\(id.capitalized) \(percentLeft(graph))", percentLeft(graph)], graph: graph, now: now), x: x, y: graph.last.remaining, band: nil, color: color(id), icon: .line, iconColor: color(id)))
             output.markers.append((x, graph.last.remaining))
         }
         return output
@@ -1046,7 +1046,7 @@ struct PlanUsageWindow: View {
             let x = normalized ? item.graph.progress(item.graph.last.date) : focus.position(item.graph.last.date)
             let name = item.provider.capitalized
             let base = item.window == "session" ? ["\(name) · 5h", "\(name) 5h"] : ["\(name) · Weekly", "\(name) wk"]
-            let variants = tagVariants(base, graph: item.graph)
+            let variants = tagVariants(base, graph: item.graph, now: now)
             output.labels.append(.init(id: item.id + "-tag", variants: variants, x: x, y: item.graph.last.remaining, band: nil,
                                        color: bothLabelTint(item.provider, item.window), icon: .line, iconColor: bothTint(item.provider, item.window)))
             output.markers.append((x, item.graph.last.remaining))

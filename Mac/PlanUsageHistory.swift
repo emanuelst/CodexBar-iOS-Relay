@@ -289,6 +289,12 @@ struct PlanUsageGraph: Equatable {
         return segment
     }
 
+    /// The badge expires by elapsed time, independently of hourly history coalescing.
+    func isNew(at now: Date) -> Bool {
+        let elapsed = now.timeIntervalSince(start)
+        return elapsed >= 0 && elapsed < 5 * 60
+    }
+
     func progress(_ date: Date) -> Double {
         100 * date.timeIntervalSince(start) / reset.timeIntervalSince(start)
     }
