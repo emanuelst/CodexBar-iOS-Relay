@@ -137,9 +137,9 @@ public struct ProviderRow: View {
         }
     }
 
-    /// Pace line color: deficit / runs-out = warning, on-pace / reserve / lasts = OK.
+    /// Pace line color: deficit / run-out = warning, on-pace / reserve / lasts = OK.
     private func paceColor(_ text: String) -> Color {
-        if text.contains("deficit") || text.contains("Runs out") { return .orange }
+        if text.contains("deficit") || text.contains("Out") { return .orange }
         return .secondary
     }
 

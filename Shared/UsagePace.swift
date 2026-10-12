@@ -103,7 +103,7 @@ public enum UsagePaceText {
     /// Matches CodexBar's `minimumExpectedPercent`.
     static let minimumExpectedPercent: Double = 3
 
-    /// Full "Pace: … · …" line for a single rate window, or nil if pace isn't
+    /// Compact pace line for a single rate window, or nil if pace isn't
     /// applicable. Per-window (primary/secondary/tertiary) — the math is identical
     /// for any window carrying windowMinutes + resetsAt with remaining > 0.
     /// Matches CodexBar 0.37+ which computes pace per window, not weekly-only.
@@ -117,9 +117,9 @@ public enum UsagePaceText {
 
         let left = leftLabel(for: pace)
         if let right = rightLabel(for: pace, now: now) {
-            return "Pace: \(left) · \(right)"
+            return "\(left) · \(right)"
         }
-        return "Pace: \(left)"
+        return left
     }
 
     /// Shared by the summary and chart projection so both use the same eligibility rules and math.
@@ -139,8 +139,8 @@ public enum UsagePaceText {
         let deltaValue = Int(abs(pace.deltaPercent).rounded())
         switch pace.stage {
         case .onTrack: return "On pace"
-        case .slightlyAhead, .ahead, .farAhead: return "\(deltaValue)% in deficit"
-        case .slightlyBehind, .behind, .farBehind: return "\(deltaValue)% in reserve"
+        case .slightlyAhead, .ahead, .farAhead: return "\(deltaValue)% deficit"
+        case .slightlyBehind, .behind, .farBehind: return "\(deltaValue)% reserve"
         }
     }
 
@@ -149,7 +149,7 @@ public enum UsagePaceText {
         guard let etaSeconds = pace.etaSeconds else { return nil }
         let date = now.addingTimeInterval(etaSeconds)
         let countdown = ResetCountdown.countdown(from: ISO8601DateFormatter().string(from: date), now: now) ?? "now"
-        if countdown == "now" { return "Runs out now" }
-        return "Runs out \(ResetCountdown.absoluteDateTime(date, now: now)) · \(countdown)"
+        if countdown == "now" { return "Out now" }
+        return "Out \(ResetCountdown.absoluteDateTime(date, now: now)) · \(countdown)"
     }
 }
