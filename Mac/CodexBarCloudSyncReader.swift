@@ -87,6 +87,8 @@ struct CodexBarCloudSyncReader {
     private let devFileURL: URL?
     private let decoder: JSONDecoder
 
+    var watchedFileURLs: [URL] { [fileURL] + (devFileURL.map { [$0] } ?? []) }
+
     init(fileURL: URL = Self.defaultFileURL(), devFileURL: URL? = nil) {
         self.fileURL = fileURL
         self.devFileURL = devFileURL ?? (fileURL == Self.defaultFileURL()
@@ -143,7 +145,7 @@ struct CodexBarCloudSyncReader {
         guard !freshSnapshots.isEmpty else {
             let latest = snapshots.values.map(\.fetchedAt).max() ?? now
             FileHandle.standardError.write(
-                Data(("[codexbarsync] CodexBar iCloud snapshot stale (\(Int(now.timeIntervalSince(latest)))s); using live CLI fallback\n").utf8))
+                Data(("[codexbarsync] No fresh CodexBar iCloud snapshot (latest age: \(Int(now.timeIntervalSince(latest)))s)\n").utf8))
             return nil
         }
 

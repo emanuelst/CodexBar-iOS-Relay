@@ -16,17 +16,23 @@ final class ICloudDocumentWriter: ObservableObject {
     @Published private(set) var lastError: String?
 
     private let bookmarkKey = "mac.iCloudDoc.bookmark"
+    private var lastWrittenPayload: Payload?
+    private var lastWrittenURL: URL?
 
-    init() {
-        loadBookmark()
+    init(fileURL: URL? = nil) {
+        if let fileURL { self.fileURL = fileURL } else { loadBookmark() }
     }
 
     var isConfigured: Bool { fileURL != nil }
 
-    var statusText: String? {
+    func statusText(now: Date) -> String? {
         if let url = fileURL {
-            if let d = lastWrite {
-                return "\(url.lastPathComponent) · written \(RelativeDateTimeFormatter().localizedString(for: d, relativeTo: Date()))"
+            if let payload = lastWrittenPayload, lastWrittenURL == url {
+                // Show the oldest known displayed provider capture, not the time we copied it.
+                let capture = payload.usage.compactMap { $0.usage?.updatedAt }
+                    .compactMap(ResetCountdown.date(from:)).min()
+                let timestamp = capture.map { ISO8601DateFormatter().string(from: $0) } ?? payload.syncedAt
+                return "\(url.lastPathComponent) · usage updated \(SyncFreshness.relativeAgeLabel(from: timestamp, now: now))"
             }
             return url.lastPathComponent
         }
@@ -34,7 +40,7 @@ final class ICloudDocumentWriter: ObservableObject {
     }
 
     /// Presents a save panel seeded in the user's iCloud Drive so they can pick/create
-    /// the snapshot file. The Mac writes here on every poll; iOS reads the same file.
+    /// the snapshot file. The Mac writes changed snapshots; iOS reads the same file.
     func pickFile() {
         let panel = NSSavePanel()
         panel.title = "Choose CodexBar iOS Relay snapshot in iCloud Drive"
@@ -53,6 +59,9 @@ final class ICloudDocumentWriter: ObservableObject {
 
     func clear() {
         fileURL = nil
+        lastWrittenPayload = nil
+        lastWrittenURL = nil
+        lastWrite = nil
         UserDefaults.standard.removeObject(forKey: bookmarkKey)
     }
 
@@ -62,14 +71,21 @@ final class ICloudDocumentWriter: ObservableObject {
         guard let url = fileURL else { return }
         guard let data = UsageJson.encode(payload) else { lastError = "encode failed"; return }
         let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        if lastWrittenURL == url, lastWrittenPayload == payload,
+           FileManager.default.fileExists(atPath: url.path) {
+            lastError = nil
+            return
+        }
         do {
             try data.write(to: url, options: .atomic)
             lastWrite = Date()
+            lastWrittenPayload = payload
+            lastWrittenURL = url
             lastError = nil
         } catch {
             lastError = "write: \(error)"
         }
-        if scoped { url.stopAccessingSecurityScopedResource() }
     }
 
     private func saveBookmark(for url: URL) {

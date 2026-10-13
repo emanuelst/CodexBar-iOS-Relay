@@ -119,7 +119,10 @@ private struct MacRootView: View {
                 .buttonStyle(.borderless)
                 .help(floatingMode ? "Turn off always-on-top" : "Keep window on top (super monitoring)")
                 Menu {
-                    Button("Choose iCloud Drive file…") { sync.iCloudWriter.pickFile() }
+                    Button("Choose iCloud Drive file…") {
+                        sync.iCloudWriter.pickFile()
+                        sync.refreshVisibility()
+                    }
                     if sync.iCloudWriter.isConfigured {
                         Button("Stop writing to iCloud Drive") { sync.iCloudWriter.clear() }
                     }
@@ -156,7 +159,7 @@ private struct MacRootView: View {
                 .accessibilityLabel("Refresh")
             }
             .padding(8)
-            if let s = sync.iCloudWriter.statusText, sync.iCloudWriter.isConfigured {
+            if let s = sync.iCloudWriter.statusText(now: now), sync.iCloudWriter.isConfigured {
                 HStack(spacing: 4) {
                     Image(systemName: "icloud").font(.caption2).foregroundStyle(.secondary)
                     Text(s).font(.caption2).foregroundStyle(.secondary).lineLimit(1)

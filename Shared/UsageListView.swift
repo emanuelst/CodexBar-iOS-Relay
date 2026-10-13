@@ -277,7 +277,7 @@ public struct ProviderRow: View {
             }()
             Text("\(label) \(rendered)\(countdown)")
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(label == "Plan renews" ? Color.blue : Color.secondary)
+                .foregroundStyle(Color.blue)
         }
     }
 

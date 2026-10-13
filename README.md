@@ -26,6 +26,28 @@ It does not access CloudKit directly or sync credentials. The Mac Relay then
 writes the resulting, read-only payload to the user-selected iCloud Drive file
 so the iPhone app can consume it without a paid developer account.
 
+### Refresh timing
+
+The Mac Relay watches the snapshot files and updates when CodexBar writes new
+data, including when it replaces a file atomically. It also rereads the cache
+when Relay becomes active or the Mac wakes. The existing 60-second poll remains
+as a recovery path; file/focus/wake events never launch extra provider requests.
+
+CodexBar's own snapshot publishing interval still applies (two minutes in
+0.74.1). Relay cannot display a measurement before CodexBar publishes it. The
+iPhone can additionally lag while iCloud Drive transfers the file.
+
+Unchanged payloads are not rewritten to iCloud Drive. The Mac file footer shows
+the age of the oldest known displayed provider measurement, so copying an old
+snapshot does not make it look newly measured. A new capture timestamp, even
+with unchanged percentages, is still written.
+
+Synthetic refresh checks (no provider calls, app launches or installation):
+
+```sh
+swiftc -parse-as-library Shared/Models.swift Shared/ResetCountdown.swift Mac/SnapshotFileWatcher.swift Mac/iCloudDocumentWriter.swift Tests/SnapshotRefreshChecks.swift -o /tmp/relay-refresh-checks && /tmp/relay-refresh-checks
+```
+
 ## Run
 ```sh
 xcodegen generate

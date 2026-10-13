@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AppKit
 
 @inline(__always)
 private func logErr(_ s: String) {
@@ -18,6 +19,9 @@ final class UsagePoller: ObservableObject {
 
     let interval: TimeInterval
     private var timer: Timer?
+    private var cacheWatchers: [SnapshotFileWatcher] = []
+    private var activationObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
     private var isPolling = false
     private struct CodexSubscriptionMetadata {
         let accountEmail: String?
@@ -37,14 +41,60 @@ final class UsagePoller: ObservableObject {
     }
 
     func start() {
+        guard timer == nil else { return }
+        cacheWatchers = cloudSyncReader.watchedFileURLs.map { url in
+            SnapshotFileWatcher(fileURL: url) { [weak self] in
+                Task { @MainActor in self?.refreshFromCache() }
+            }
+        }
+        cacheWatchers.forEach { $0.start() }
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshFromCache() }
+        }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshFromCache() }
+        }
         Task { await poll() }
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { await self?.poll() }
         }
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     func stop() {
         timer?.invalidate(); timer = nil
+        cacheWatchers.forEach { $0.stop() }
+        cacheWatchers = []
+        if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
+        if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
+        activationObserver = nil
+        wakeObserver = nil
+    }
+
+    /// File, focus and wake events only read local data. A transient missing or
+    /// partial cache must not cause extra provider requests or credential prompts.
+    private func refreshFromCache() {
+        guard timer != nil else { return }
+        _ = applyCachedPayload()
+    }
+
+    @discardableResult
+    private func applyCachedPayload() -> Bool {
+        guard let cloudPayload = cloudSyncReader.readPayload() else { return false }
+        let payload = payloadWithCachedCodexMetadata(cloudPayload)
+        if self.payload != payload || lastError != nil {
+            self.payload = payload
+            syncedAt = ResetCountdown.date(from: payload.syncedAt)
+            lastError = nil
+        }
+        // The writer deduplicates successes; keep callbacks so failed writes can retry.
+        onUpdate?()
+        return true
     }
 
     func poll() async {
@@ -59,15 +109,7 @@ final class UsagePoller: ObservableObject {
         }
 
         do {
-            if let cloudPayload = cloudSyncReader.readPayload() {
-                let payload = self.payloadWithCachedCodexMetadata(cloudPayload)
-                self.payload = payload
-                self.syncedAt = ResetCountdown.date(from: payload.syncedAt)
-                self.lastError = nil
-                logErr("CodexBar iCloud snapshot ok: \(payload.usage.count) entries")
-                self.onUpdate?()
-                return
-            }
+            if applyCachedPayload() { return }
 
             let raw: Data
             do {
@@ -92,6 +134,9 @@ final class UsagePoller: ObservableObject {
                 return
             }
             entries = await replacingCodexWithCLIUsage(in: entries)
+            // A file event can arrive while the compatibility CLI request is running.
+            // Prefer that newly available cache over the in-flight fallback result.
+            if applyCachedPayload() { return }
             let now = ISO8601DateFormatter().string(from: Date())
             let p = Payload(
                 syncedAt: now,
@@ -105,6 +150,7 @@ final class UsagePoller: ObservableObject {
             self.lastError = nil
             logErr("poll ok: \(entries.count) entries, \(raw.count) bytes")
         } catch {
+            if applyCachedPayload() { return }
             self.lastError = "\(error)"
             logErr("poll error: \(error)")
         }
