@@ -36,7 +36,7 @@ Event labels no longer sit at fake data values. Actual-time charts reserve point
 `Tests/PlanUsageAnnotationLayoutChecks.swift` covers stacking, shortening, determinism, weekday retention, edge clamping, priority drops, floating-tag avoidance and axis thinning. The render proof adds `collision-*` fixtures reproducing the crowded live case (Now, a reset 2 minutes away, run-outs 1 minute apart) at 680 and 580 pt.
 
 ```
-swiftc -parse-as-library -o /tmp/layout-checks Tests/PlanUsageAnnotationLayoutChecks.swift Mac/PlanUsageHistory.swift && /tmp/layout-checks
+swiftc -parse-as-library -o /tmp/layout-checks Tests/PlanUsageAnnotationLayoutChecks.swift Mac/PlanUsageHistory.swift Shared/Models.swift Shared/ResetCountdown.swift && /tmp/layout-checks
 ```
 
 ### Session context after a reset
@@ -70,3 +70,12 @@ Each event and line label starts with the mark it stands for, in that mark's exa
 Run-out labels carry a countdown like the 5h reset labels ("● Codex runs out 22:34 · in 34m"). It is the first part dropped when space is tight. The summary row's "Out …" line shows the same countdown.
 
 The layout solves the top lanes, bottom lanes and floating labels as separate groups, since they never share space. A crowded group shortens only its own labels. Both has four top lanes and three bottom lanes.
+
+
+## Plan-expiry markers
+
+Actual-time single-provider, Combined, and Both charts show a thin neutral dashed plan-expiry rule when an exact timestamp falls within that provider's current quota window. Its opaque, neutral label names the provider and expiry time and prefers the space immediately to the right of its rule; the summary retains the full timestamp and countdown in provider colour. Both deduplicates each provider's marker. Fixed annotation space prevents expiry metadata updates from shifting the plot. Collision-aware labels move or shorten when needed. Expiry never stretches the time axis or changes forecasts; normalized comparison has no calendar-date rule.
+
+The window receives Relay's existing payload without launching another poller or fetching provider data. The selected history account key is loaded together with its series and must match the payload's email history key, an explicit Codex provider-account ID, or Claude email-and-organization/plan key. When Codex sync supplies only an email but local graph history is scoped to a managed workspace ID, Relay bridges them through CodexBar's local account snapshot cache only if that email maps to exactly one workspace ID. Existing display-safe identity fields are forwarded from the producer. Opaque credential/profile keys that cannot be verified are omitted. Date-only, expired, ambiguous, missing, and over-five-minute-old snapshots do not produce markers. New source ownership shapes must be supported explicitly before displaying their dates.
+
+`Tests/PlanUsageExpiryChecks.swift` covers provider/account/plan isolation, legacy and canonical Codex keys, timestamp precision, stale/future snapshots, duplicates, and window boundaries. The annotation layout checks remain applicable to the added labels.

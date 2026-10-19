@@ -27,6 +27,8 @@ final class UsagePoller: ObservableObject {
         let accountEmail: String?
         let renewsAt: String?
         let expiresAt: String?
+        let renewsAtIsDateOnly: Bool?
+        let expiresAtIsDateOnly: Bool?
     }
 
     private var cachedCodexSubscriptionMetadata: CodexSubscriptionMetadata?
@@ -265,7 +267,14 @@ final class UsagePoller: ObservableObject {
             codexResetCredits: credits,
             subscriptionRenewsAt: renewsAt,
             subscriptionExpiresAt: expiresAt,
-            details: cliUsage.details
+            details: cliUsage.details,
+            subscriptionRenewsAtIsDateOnly: cliUsage.subscriptionRenewsAt != nil ? cliUsage.subscriptionRenewsAtIsDateOnly
+                : fallbackUsage?.subscriptionRenewsAt != nil ? fallbackUsage?.subscriptionRenewsAtIsDateOnly
+                : (metadataMatchesAccount ? webMetadata?.renewsAtIsDateOnly : nil),
+            subscriptionExpiresAtIsDateOnly: cliUsage.subscriptionExpiresAt != nil ? cliUsage.subscriptionExpiresAtIsDateOnly
+                : fallbackUsage?.subscriptionExpiresAt != nil ? fallbackUsage?.subscriptionExpiresAtIsDateOnly
+                : (metadataMatchesAccount ? webMetadata?.expiresAtIsDateOnly : nil),
+            identity: cliUsage.identity
         )
         return UsageEntry(
             provider: cliCodex.provider,
@@ -288,7 +297,9 @@ final class UsagePoller: ObservableObject {
             accountEmail: root["accountEmail"] as? String
                 ?? snapshot["signedInEmail"] as? String,
             renewsAt: snapshot["subscriptionRenewsAt"] as? String,
-            expiresAt: snapshot["subscriptionExpiresAt"] as? String)
+            expiresAt: snapshot["subscriptionExpiresAt"] as? String,
+            renewsAtIsDateOnly: snapshot["subscriptionRenewsAtIsDateOnly"] as? Bool,
+            expiresAtIsDateOnly: snapshot["subscriptionExpiresAtIsDateOnly"] as? Bool)
         if metadata.renewsAt != nil || metadata.expiresAt != nil { return metadata }
         return nil
     }
@@ -349,7 +360,9 @@ final class UsagePoller: ObservableObject {
             let metadata = CodexSubscriptionMetadata(
                 accountEmail: usage.accountEmail,
                 renewsAt: usage.subscriptionRenewsAt,
-                expiresAt: usage.subscriptionExpiresAt
+                expiresAt: usage.subscriptionExpiresAt,
+                renewsAtIsDateOnly: usage.subscriptionRenewsAtIsDateOnly,
+                expiresAtIsDateOnly: usage.subscriptionExpiresAtIsDateOnly
             )
             guard metadata.renewsAt != nil || metadata.expiresAt != nil else {
                 logErr("codex web metadata skipped: subscription date missing")

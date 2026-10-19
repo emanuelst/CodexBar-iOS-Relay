@@ -1,4 +1,5 @@
 import CoreGraphics
+import CryptoKit
 import Foundation
 
 /// Read-only adapter for CodexBar's version-1 PlanUtilizationHistoryStore.
@@ -306,12 +307,20 @@ struct PlanUsageHistoryReader {
         .appendingPathComponent("Library/Application Support/com.steipete.codexbar/history")) {
         self.directory = directory
     }
-    func read(provider: String) -> [PlanUsageSeries] {
+    struct Selection {
+        let accountKey: String?
+        let series: [PlanUsageSeries]
+        static let unavailable = Selection(accountKey: nil, series: [])
+    }
+
+    func read(provider: String) -> [PlanUsageSeries] { readSelection(provider: provider).series }
+
+    func readSelection(provider: String) -> Selection {
         guard ["codex", "claude"].contains(provider),
-              let data = try? Data(contentsOf: directory.appendingPathComponent(provider + ".json")) else { return [] }
+              let data = try? Data(contentsOf: directory.appendingPathComponent(provider + ".json")) else { return .unavailable }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let document = try? decoder.decode(PlanUsageHistoryDocument.self, from: data) else { return [] }
+        guard let document = try? decoder.decode(PlanUsageHistoryDocument.self, from: data) else { return .unavailable }
         // Upstream folds legacy Codex 30-day payload slots into Monthly. Merge only within
         // the already selected owner; canonicalize the same ±5-minute duration tolerance.
         let groups = Dictionary(grouping: document.selected.filter { (provider == "codex" ? ["session", "weekly", "monthly"] : ["session", "weekly", "opus"]).contains($0.name) && $0.windowMinutes > 0 && !$0.entries.isEmpty }) { series in
@@ -320,13 +329,14 @@ struct PlanUsageHistoryReader {
                 : lane == "weekly" && (10070...10090).contains(series.windowMinutes) ? 10080 : series.windowMinutes
             return "\(lane):\(duration)"
         }
-        return groups.values.compactMap { values in
+        let series: [PlanUsageSeries] = groups.values.compactMap { values in
             guard let first = values.first else { return nil }
             let lane = provider == "codex" ? first.lane : first.name
             let duration = lane == "session" && (295...305).contains(first.windowMinutes) ? 300
                 : lane == "weekly" && (10070...10090).contains(first.windowMinutes) ? 10080 : first.windowMinutes
             return PlanUsageSeries(name: lane, windowMinutes: duration, entries: values.flatMap(\.entries))
         }.sorted { $0.windowMinutes == $1.windowMinutes ? $0.name < $1.name : $0.windowMinutes < $1.windowMinutes }
+        return Selection(accountKey: document.version == 1 ? document.preferredAccountKey : nil, series: series)
     }
 }
 
@@ -337,6 +347,7 @@ struct PlanUsageHistoryReader {
 struct PlanUsageAnnotationLayout {
     enum Band: Equatable { case top, bottom }
     enum Kind: Equatable { case lane(Band), floating(CGPoint) }
+    enum LaneAlignment: Equatable { case centered, afterAnchor }
 
     struct Label: Equatable {
         let id: String
@@ -345,6 +356,7 @@ struct PlanUsageAnnotationLayout {
         /// Plot-space x the label must stay attached to.
         let anchorX: CGFloat
         let kind: Kind
+        var alignment: LaneAlignment = .centered
     }
 
     struct Placement: Equatable {
@@ -443,11 +455,17 @@ struct PlanUsageAnnotationLayout {
         case .lane(let band):
             let lanes = band == .top ? topLanes : bottomLanes
             var output: [(CGRect, Int?)] = []
-            for lane in 0..<lanes {
-                let row = laneRect(band, lane)
-                let y = row.midY - size.height / 2
-                // Centered, then starting at the rule, then ending at it: every option touches the rule.
-                for x in [label.anchorX - size.width / 2, label.anchorX - 6, label.anchorX - size.width + 6] {
+            let positions: [CGFloat] = switch label.alignment {
+            case .centered: [label.anchorX - size.width / 2, label.anchorX - 6, label.anchorX - size.width + 6]
+            case .afterAnchor: [label.anchorX + 6, label.anchorX - size.width / 2, label.anchorX - size.width + 6]
+            }
+            // For expiry labels, exhaust the preferred side in every lane before trying a
+            // centered fallback; otherwise a collision in the first lane can pull it back
+            // across the Now marker even when the next lane is clear to the right.
+            for x in positions {
+                for lane in 0..<lanes {
+                    let row = laneRect(band, lane)
+                    let y = row.midY - size.height / 2
                     output.append((clamped(CGRect(x: x, y: y, width: size.width, height: size.height)), lane))
                 }
             }
@@ -480,5 +498,110 @@ struct PlanUsageAnnotationLayout {
             output.append(position)
         }
         return output
+    }
+}
+
+/// Subscription timestamps never inherit ownership from a provider name or matching quota values.
+/// Match only the email/plan history keys we can verify from Relay's display-safe payload.
+/// Credential/profile owners that cannot be verified from this payload omit the marker.
+enum PlanUsageExpiry {
+    private struct CodexAccountSnapshotCache: Decodable {
+        struct Record: Decodable {
+            struct Identity: Decodable {
+                let normalizedEmail: String?
+                let workspaceAccountID: String?
+            }
+            let accountIdentity: Identity?
+        }
+        let version: Int
+        let records: [Record]
+    }
+
+    /// Resolve an email-only synced Codex identity to its managed history owner only when
+    /// CodexBar's local account cache gives that email exactly one workspace ID.
+    static func managedCodexHistoryKeys(payload: Payload?, cacheData: Data?) -> Set<String> {
+        self.managedCodexHistoryKeys(email: self.managedCodexEmail(payload: payload), cacheData: cacheData)
+    }
+
+    static func managedCodexEmail(payload: Payload?) -> String? {
+        guard let entry = payload?.usage.first(where: { $0.provider == "codex" }),
+              payload?.usage.filter({ $0.provider == "codex" }).count == 1,
+              entry.error == nil, let usage = entry.usage,
+              usage.identity?.providerID == nil || usage.identity?.providerID == "codex",
+              usage.identity?.accountID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+              let email = (usage.identity?.accountEmail ?? usage.accountEmail)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !email.isEmpty else { return nil }
+        return email
+    }
+
+    static func managedCodexHistoryKeys(email: String?) -> Set<String> {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        let url = support.appendingPathComponent("CodexBar/codex-account-snapshots.json")
+        return self.managedCodexHistoryKeys(email: email, cacheData: try? Data(contentsOf: url))
+    }
+
+    private static func managedCodexHistoryKeys(email: String?, cacheData: Data?) -> Set<String> {
+        guard let email, !email.isEmpty,
+              let cacheData,
+              let cache = try? JSONDecoder().decode(CodexAccountSnapshotCache.self, from: cacheData),
+              cache.version == 1
+        else { return [] }
+
+        let workspaceIDs = Set(cache.records.compactMap { record -> String? in
+            guard record.accountIdentity?.normalizedEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == email,
+                  let workspaceID = record.accountIdentity?.workspaceAccountID?
+                      .trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !workspaceID.isEmpty
+            else { return nil }
+            return workspaceID
+        })
+        guard workspaceIDs.count == 1, let workspaceID = workspaceIDs.first else { return [] }
+        return ["codex:v1:provider-account:\(workspaceID)"]
+    }
+
+    static func historyKeys(provider: String, usage: Usage) -> Set<String> {
+        func normalized(_ value: String?) -> String? {
+            guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !value.isEmpty else { return nil }
+            return value
+        }
+        guard ["codex", "claude"].contains(provider),
+              usage.identity?.providerID == nil || usage.identity?.providerID == provider,
+              let email = normalized(usage.identity?.accountEmail ?? usage.accountEmail) else { return [] }
+        if let legacyEmail = normalized(usage.accountEmail), legacyEmail != email { return [] }
+        func hash(_ value: String) -> String {
+            SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+        }
+        if provider == "codex" {
+            if let accountID = usage.identity?.accountID?.trimmingCharacters(in: .whitespacesAndNewlines), !accountID.isEmpty {
+                return ["codex:v1:provider-account:\(accountID)"]
+            }
+            let digest = hash(email)
+            return [digest, "codex:v1:email-hash:\(digest)"]
+        }
+        // Mirror upstream's discriminator precedence: organization, recognized plan, raw login method.
+        if let organization = normalized(usage.identity?.accountOrganization) {
+            return [hash("claude:email:\(email):org:\(organization)")]
+        }
+        if let login = normalized(usage.identity?.loginMethod ?? usage.loginMethod) {
+            let words = Set(login.components(separatedBy: CharacterSet.alphanumerics.inverted))
+            let plan = ["max", "pro", "team", "enterprise", "ultra"].first(where: words.contains) ?? login
+            return [hash("claude:email:\(email):plan:\(plan)")]
+        }
+        return [hash("claude:email:\(email)")]
+    }
+
+    static func date(provider: String, accountKey: String?, payload: Payload?, additionalHistoryKeys: Set<String> = [],
+                     window: ClosedRange<Date>, now: Date) -> Date? {
+        guard let accountKey, let entries = payload?.usage.filter({ $0.provider == provider }),
+              entries.count == 1, let entry = entries.first, entry.error == nil,
+              let usage = entry.usage,
+              (historyKeys(provider: provider, usage: usage).union(additionalHistoryKeys)).contains(accountKey),
+              let captured = usage.updatedAt.flatMap(ResetCountdown.date(from:)),
+              (0...300).contains(now.timeIntervalSince(captured)),
+              usage.subscriptionExpiresAtIsDateOnly != true,
+              let value = usage.subscriptionExpiresAt, value.count > 10,
+              let expiry = ResetCountdown.date(from: value), expiry > now,
+              window.contains(expiry) else { return nil }
+        return expiry
     }
 }

@@ -36,7 +36,7 @@ struct CodexBarSyncMacApp: App {
         }
         .defaultSize(width: 380, height: 560)
         Window("Plan Usage", id: "plan-usage") {
-            PlanUsageWindow()
+            PlanUsageWindow(payload: sync.payload)
         }
         .defaultSize(width: 680, height: 720)
     }

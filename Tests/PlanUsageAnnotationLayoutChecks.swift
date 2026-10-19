@@ -22,7 +22,11 @@ import Foundation
                 // A lane label must stay on its rule unless the plot edge forced a clamp.
                 if a.lane != nil, let label = labels.first(where: { $0.id == a.id }),
                    a.frame.minX > layout.plot.minX, a.frame.maxX < layout.plot.maxX {
-                    precondition(a.frame.minX <= label.anchorX && a.frame.maxX >= label.anchorX, "\(a.id) detached", file: file, line: line)
+                    if label.alignment == .afterAnchor {
+                        precondition(a.frame.minX >= label.anchorX, "\(a.id) should sit after its marker", file: file, line: line)
+                    } else {
+                        precondition(a.frame.minX <= label.anchorX && a.frame.maxX >= label.anchorX, "\(a.id) detached", file: file, line: line)
+                    }
                 }
             }
         }
@@ -72,6 +76,14 @@ import Foundation
         let edgeFrame = edgeLayout.solve([edge]).placements[0].frame
         precondition(edgeFrame.maxX <= wide.maxX && edgeFrame.minX >= wide.minX)
 
+        // Expiry labels sit after their rule so they cannot read as attached to the nearby Now line.
+        let expiry = Layout.Label(id: "expiry", variants: ["Codex plan expires Tue 16:30"], anchorX: wide.midX,
+                                  kind: .lane(.top), alignment: .afterAnchor)
+        let expiryLayout = Layout(plot: wide, topLanes: 2, bottomLanes: 0, measure: measure)
+        let expiryResult = expiryLayout.solve([expiry])
+        precondition(expiryResult.dropped.isEmpty && expiryResult.placements[0].frame.minX >= expiry.anchorX + 6)
+        assertClean(expiryResult, in: expiryLayout, [expiry])
+
         // When lanes run out, the lowest-priority label is dropped, never an earlier one.
         let full = (0..<3).map { lane("p\($0)", ["Label number \($0)"], wide.midX) }
         let dropped = Layout(plot: wide, topLanes: 2, bottomLanes: 0, measure: measure).solve(full)
@@ -100,6 +112,6 @@ import Foundation
         // Axis thinning keeps the first label and a minimum gap.
         precondition(Layout.thinned([0, 0.02, 0.05, 0.1, 0.12, 0.3], minimumGap: 0.085) == [0, 0.1, 0.3])
 
-        print("Plan Usage annotation layout checks passed: lane stacking, shortening, determinism, weekday retention, edge clamping, priority drops, floating tag avoidance, independent groups, axis thinning")
+        print("Plan Usage annotation layout checks passed: lane stacking, shortening, determinism, weekday retention, edge clamping, expiry alignment, priority drops, floating tag avoidance, independent groups, axis thinning")
     }
 }

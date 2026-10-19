@@ -21,6 +21,7 @@ private enum PlanUsageLabelIcon {
     case line
     case reset(filled: Bool)
     case runout(filled: Bool)
+    case expiry
 }
 
 private struct PlanUsageChartLabel {
@@ -32,6 +33,7 @@ private struct PlanUsageChartLabel {
     let color: Color
     var icon: PlanUsageLabelIcon? = nil
     var iconColor: Color? = nil
+    var alignsAfterAnchor = false
 }
 
 /// Labels in priority order plus marker points floating labels must not cover.
@@ -55,10 +57,15 @@ struct PlanUsageWindow: View {
     @State private var normalized = false
     @State private var histories: [String: [PlanUsageSeries]] = [:]
     @State private var accents: [String: String] = [:]
+    @State private var accountKeys: [String: String] = [:]
+    @State private var accountKeyAliases: Set<String> = []
+    private let payload: Payload?
     private let fixture: [String: [PlanUsageSeries]]?
 
-    init(fixture: [String: [PlanUsageSeries]]? = nil, provider: String = "Combined", normalized: Bool = false, lane: String = "weekly") {
+    init(fixture: [String: [PlanUsageSeries]]? = nil, provider: String = "Combined", normalized: Bool = false, lane: String = "weekly", payload: Payload? = nil, accountKeys: [String: String] = [:]) {
         self.fixture = fixture
+        self.payload = payload
+        self._accountKeys = State(initialValue: accountKeys)
         self._provider = State(initialValue: provider)
         self._lane = State(initialValue: lane)
         self._normalized = State(initialValue: normalized)
@@ -120,14 +127,18 @@ struct PlanUsageWindow: View {
         .background(WindowFloatAccessor(floating: $floating))
         .task {
             guard fixture == nil else { return }
+            let codexEmail = PlanUsageExpiry.managedCodexEmail(payload: payload)
             while !Task.isCancelled {
                 // Decode off the main actor; replace both selections atomically, clearing disappeared owners.
                 let loaded = await Task.detached(priority: .utility) {
                     let reader = PlanUsageHistoryReader()
-                    return (["codex": reader.read(provider: "codex"), "claude": reader.read(provider: "claude")], PlanUsageAccent.read())
+                    return (["codex": reader.readSelection(provider: "codex"), "claude": reader.readSelection(provider: "claude")],
+                            PlanUsageAccent.read(), PlanUsageExpiry.managedCodexHistoryKeys(email: codexEmail))
                 }.value
-                histories = loaded.0
+                histories = loaded.0.mapValues(\.series)
+                accountKeys = loaded.0.compactMapValues(\.accountKey)
                 accents = loaded.1
+                accountKeyAliases = loaded.2
                 if !lanes.contains(lane) { lane = "session" }
                 do { try await Task.sleep(for: .seconds(30)) } catch { return }
             }
@@ -243,6 +254,27 @@ struct PlanUsageWindow: View {
         })
     }
 
+    private func planExpiry(_ id: String, graph: PlanUsageGraph, now: Date) -> Date? {
+        PlanUsageExpiry.date(provider: id, accountKey: accountKeys[id], payload: payload,
+                             additionalHistoryKeys: accountKeyAliases,
+                             window: graph.start...graph.reset, now: now)
+    }
+
+    @ChartContentBuilder
+    private func expiryRule<X: Plottable>(_ id: String, at x: X, date: Date, now: Date) -> some ChartContent {
+        RuleMark(x: .value("Plan expires", x))
+            .foregroundStyle(Color.secondary.opacity(0.55))
+            .lineStyle(StrokeStyle(lineWidth: 0.8, dash: [2, 3]))
+            .accessibilityLabel("\(id.capitalized) plan expires")
+            .accessibilityValue(ResetCountdown.absoluteDateTime(date, now: now))
+    }
+
+    private func expiryLabel(_ id: String, date: Date, x: Double, now: Date) -> PlanUsageChartLabel {
+        let time = resetPlotTime(date, window: "weekly")
+        return .init(id: id + "-plan-expiry", variants: ["\(id.capitalized) plan expires \(time)", "\(id.capitalized) expires \(time)"],
+                     x: x, band: .top, color: .primary, icon: .expiry, iconColor: .secondary, alignsAfterAnchor: true)
+    }
+
     @ViewBuilder
     private func providerGraph(_ id: String, window: String, now: Date) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -251,11 +283,14 @@ struct PlanUsageWindow: View {
             if let graph = graph(id, in: window, now: now) {
                 let timeZone = TimeZone.current
                 let forecast = runoutForecast(graph)
+                let expiry = planExpiry(id, graph: graph, now: now)
+                let topLanes = 3 // Keep the plot geometry stable when expiry metadata appears or disappears.
                 // A run-out after reset never happens, so it must not stretch the axis.
                 let axisEnd = graph.reset
                 let previous = previousGraph(id, window: window, current: graph, now: now)
                 let axis = PlanUsageTimeAxis(start: min(graph.start, previous?.start ?? graph.start), end: axisEnd, timeZone: timeZone)
                 Chart {
+                    if let expiry { expiryRule(id, at: expiry, date: expiry, now: now) }
                     if let previous {
                         previousWindowMarks(id, previous, x: { $0 }, yLabel: "Remaining")
                         if previous.resetEarly(before: graph) {
@@ -310,7 +345,7 @@ struct PlanUsageWindow: View {
                         .accessibilityValue(ResetCountdown.absoluteDateTime(now, now: now))
                 }
                 .chartXScale(domain: axis.plotStart...axis.plotEnd)
-                .chartYScale(domain: 0...100, range: annotationRange(top: 2, bottom: 1))
+                .chartYScale(domain: 0...100, range: annotationRange(top: topLanes, bottom: 1))
                 .chartYAxis { AxisMarks(values: [0, 50, 100]) }
                 .chartXAxis {
                     AxisMarks(values: axis.markDates) { value in
@@ -334,7 +369,7 @@ struct PlanUsageWindow: View {
                     }
                 }
                 .chartOverlay { proxy in
-                    annotationOverlay(singleLabels(id: id, window: window, graph: graph, previous: previous, forecast: forecast, now: now), proxy: proxy, topLanes: 2, bottomLanes: 1)
+                    annotationOverlay(singleLabels(id: id, window: window, graph: graph, previous: previous, forecast: forecast, now: now), proxy: proxy, topLanes: topLanes, bottomLanes: 1)
                 }
                 .chartLegend(.hidden).frame(height: 222)
                 .accessibilityLabel(id.capitalized + " recorded remaining quota")
@@ -452,6 +487,10 @@ struct PlanUsageWindow: View {
     private func overlayBoth(now: Date) -> some View {
         let entries = [("codex", "session"), ("claude", "session"), ("codex", "weekly"), ("claude", "weekly")]
             .compactMap { id, window in graph(id, in: window, now: now).map { PlanUsageWindowGraph(provider: id, window: window, graph: $0) } }
+        let expiries: [(String, Date)] = normalized ? [] : ["codex", "claude"].compactMap { id in
+            entries.filter { $0.provider == id }.compactMap { planExpiry(id, graph: $0.graph, now: now) }.first.map { (id, $0) }
+        }
+        let topLanes = normalized ? 0 : 6 // Fixed space for two provider expiry labels.
         let earliest = entries.map { $0.graph.start }.min() ?? now.addingTimeInterval(-1)
         let latestReset = entries.map { $0.graph.reset }.max() ?? now.addingTimeInterval(1)
         let axis = PlanUsageTimeAxis(start: earliest, end: latestReset, timeZone: .current)
@@ -468,6 +507,9 @@ struct PlanUsageWindow: View {
                 .font(.headline)
             if !entries.isEmpty {
                 Chart {
+                    ForEach(expiries, id: \.0) { id, date in
+                        expiryRule(id, at: focus.position(date), date: date, now: now)
+                    }
                     if !normalized, !focus.breakDates.isEmpty {
                         RectangleMark(xStart: .value("Expanded hours", focus.position(focus.focusStart)), xEnd: .value("Expanded hours", focus.position(focus.focusEnd)), yStart: .value("Bottom", 0.0), yEnd: .value("Top", 100.0))
                             .foregroundStyle(.secondary.opacity(0.06)).accessibilityHidden(true)
@@ -551,7 +593,7 @@ struct PlanUsageWindow: View {
                     }
                 }
                 .chartXScale(domain: normalized ? 0...100 : 0...1)
-                .chartYScale(domain: 0...100, range: annotationRange(top: normalized ? 0 : 4, bottom: normalized ? 0 : 3))
+                .chartYScale(domain: 0...100, range: annotationRange(top: topLanes, bottom: normalized ? 0 : 3))
                 .chartYAxis { AxisMarks(values: [0, 50, 100]) }
                 .chartXAxis {
                     AxisMarks(values: normalized ? [0, 25, 50, 75, 100] : ticks.map { focus.position($0) }) { value in
@@ -577,7 +619,7 @@ struct PlanUsageWindow: View {
                     }
                 }
                 .chartOverlay { proxy in
-                    annotationOverlay(bothLabels(entries, focus: focus, now: now), proxy: proxy, topLanes: normalized ? 0 : 4, bottomLanes: normalized ? 0 : 3)
+                    annotationOverlay(bothLabels(entries, focus: focus, now: now), proxy: proxy, topLanes: topLanes, bottomLanes: normalized ? 0 : 3)
                 }
                 .chartLegend(.hidden)
                 .frame(height: normalized ? 300 : 398)
@@ -612,6 +654,10 @@ struct PlanUsageWindow: View {
 
     private func overlay(now: Date, window: String) -> some View {
         let graphs = ["codex", "claude"].compactMap { id in graph(id, in: window, now: now).map { (id, $0) } }
+        let expiries: [(String, Date)] = normalized ? [] : graphs.compactMap { id, graph in
+            planExpiry(id, graph: graph, now: now).map { (id, $0) }
+        }
+        let topLanes = normalized ? 0 : 5 // Fixed space for two provider expiry labels.
         let timeZone = TimeZone.current
         let previous: [(String, PlanUsageGraph)] = normalized ? [] : graphs.compactMap { id, graph in previousGraph(id, window: window, current: graph, now: now).map { (id, $0) } }
         let earliest = previous.map { $0.1.start }.min()
@@ -627,6 +673,9 @@ struct PlanUsageWindow: View {
             }
             if !graphs.isEmpty {
             Chart {
+                ForEach(expiries, id: \.0) { id, date in
+                    expiryRule(id, at: date.timeIntervalSince1970, date: date, now: now)
+                }
                 if !normalized {
                     ForEach(previous, id: \.0) { id, prior in
                         previousWindowMarks(id, prior, x: { $0.timeIntervalSince1970 }, yLabel: "Remaining %")
@@ -709,7 +758,7 @@ struct PlanUsageWindow: View {
                             .accessibilityLabel("\(id.capitalized) latest capture")
                 }
             }.chartXScale(domain: combinedDomain(graphs, earliest: earliest))
-                .chartYScale(domain: 0...100, range: annotationRange(top: normalized ? 0 : 3, bottom: normalized ? 0 : 2))
+                .chartYScale(domain: 0...100, range: annotationRange(top: topLanes, bottom: normalized ? 0 : 2))
                 .chartYAxis { AxisMarks(values: [0, 50, 100]) }
                 .chartXAxis {
                     AxisMarks(values: normalized
@@ -744,7 +793,7 @@ struct PlanUsageWindow: View {
                     }
                 }
                 .chartOverlay { proxy in
-                    annotationOverlay(overlayLabels(graphs, window: window, now: now), proxy: proxy, topLanes: normalized ? 0 : 3, bottomLanes: normalized ? 0 : 2)
+                    annotationOverlay(overlayLabels(graphs, window: window, now: now), proxy: proxy, topLanes: topLanes, bottomLanes: normalized ? 0 : 2)
                 }
                 .chartLegend(.hidden).frame(height: normalized ? 250 : 300)
             }
@@ -828,6 +877,10 @@ struct PlanUsageWindow: View {
                 Text("Started \(ResetCountdown.absoluteDateTime(graph.start, now: now)) · last capture \(capture)\(stale)")
             }
             .font(.caption2).monospacedDigit().foregroundStyle(.secondary).padding(.leading, 13)
+            if let expiry = planExpiry(id, graph: graph, now: now) {
+                Text("Plan expires \(ResetCountdown.absoluteDateTime(expiry, now: now)) · \(ResetCountdown.countdown(to: expiry, now: now))")
+                    .font(.caption2).monospacedDigit().foregroundStyle(color(id)).padding(.leading, 13)
+            }
         }
         .accessibilityElement(children: .combine)
     }
@@ -864,7 +917,7 @@ struct PlanUsageWindow: View {
                             .foregroundStyle(item.color)
                     }
                         .frame(width: item.placement.frame.width, height: item.placement.frame.height)
-                        .background(Capsule().fill(Color(nsColor: .windowBackgroundColor).opacity(0.94)))
+                        .background(Capsule().fill(Color(nsColor: .windowBackgroundColor)))
                         .overlay(Capsule().strokeBorder(item.color.opacity(0.35), lineWidth: 0.5))
                         .position(x: item.placement.frame.midX, y: item.placement.frame.midY)
                         .accessibilityLabel(item.fullText)
@@ -885,6 +938,13 @@ struct PlanUsageWindow: View {
         case .runout(let filled):
             if filled { Circle().fill(tint).frame(width: Self.iconSize - 1, height: Self.iconSize - 1) }
             else { Circle().strokeBorder(tint, lineWidth: 1.5).frame(width: Self.iconSize, height: Self.iconSize) }
+        case .expiry:
+            Path { path in
+                path.move(to: CGPoint(x: 2, y: 0))
+                path.addLine(to: CGPoint(x: 2, y: Self.iconSize))
+            }
+            .stroke(tint, style: StrokeStyle(lineWidth: 1.5, dash: [1, 2]))
+            .frame(width: Self.iconSize, height: Self.iconSize)
         }
     }
 
@@ -900,7 +960,8 @@ struct PlanUsageWindow: View {
         for label in annotations.labels {
             guard let anchorX = x(label.x) else { continue }
             if let band = label.band {
-                labels.append(.init(id: label.id, variants: label.variants, anchorX: anchorX, kind: .lane(band)))
+                labels.append(.init(id: label.id, variants: label.variants, anchorX: anchorX, kind: .lane(band),
+                                    alignment: label.alignsAfterAnchor ? .afterAnchor : .centered))
             } else if let value = label.y, let anchorY = y(value) {
                 labels.append(.init(id: label.id, variants: label.variants, anchorX: anchorX, kind: .floating(CGPoint(x: anchorX, y: anchorY))))
             }
@@ -968,7 +1029,7 @@ struct PlanUsageWindow: View {
     }
 
     private func nowLabel(_ x: Double) -> PlanUsageChartLabel {
-        PlanUsageChartLabel(id: "now", variants: ["Now"], x: x, band: .top, color: .secondary)
+        PlanUsageChartLabel(id: "now", variants: ["Now"], x: x, band: .bottom, color: .secondary)
     }
 
     /// "no usage yet" for 0% used, otherwise "new window" during the first five minutes.
@@ -987,6 +1048,9 @@ struct PlanUsageWindow: View {
         output.labels.append(nowLabel(now.timeIntervalSince1970))
         output.labels.append(.init(id: "reset", variants: resetVariants(["Resets"], reset: graph.reset, window: window, now: now), x: graph.reset.timeIntervalSince1970, band: .top, color: color(id),
                                    icon: .reset(filled: isSession(window)), iconColor: color(id)))
+        if let expiry = planExpiry(id, graph: graph, now: now) {
+            output.labels.append(expiryLabel(id, date: expiry, x: expiry.timeIntervalSince1970, now: now))
+        }
         if let depletion = forecast?.depletionDate {
             output.labels.append(runoutLabel(id: "out", names: [""], depletion: depletion, reset: graph.reset, window: window, now: now, x: min(depletion, graph.reset).timeIntervalSince1970, tint: color(id), iconTint: color(id)))
         }
@@ -1007,6 +1071,11 @@ struct PlanUsageWindow: View {
                 output.labels.append(.init(id: id + "-reset", variants: resetVariants(["\(name) resets", name], reset: graph.reset, window: window, now: now), x: graph.reset.timeIntervalSince1970, band: .top, color: color(id),
                                            icon: .reset(filled: isSession(window)), iconColor: color(id)))
                 output.markers += [(graph.reset.timeIntervalSince1970, 100), (graph.start.timeIntervalSince1970, 100)]
+            }
+            for (id, graph) in graphs {
+                if let expiry = planExpiry(id, graph: graph, now: now) {
+                    output.labels.append(expiryLabel(id, date: expiry, x: expiry.timeIntervalSince1970, now: now))
+                }
             }
             for (id, graph) in graphs {
                 guard let depletion = runoutForecast(graph)?.depletionDate else { continue }
@@ -1033,6 +1102,11 @@ struct PlanUsageWindow: View {
                 output.labels.append(.init(id: item.id + "-reset", variants: resetVariants(["\(name) \(short(item.window)) resets", "\(name) \(short(item.window))"], reset: item.graph.reset, window: item.window, now: now, marker: short(item.window) + " "), x: focus.position(item.graph.reset), band: .top,
                                            color: bothLabelTint(item.provider, item.window), icon: .reset(filled: isSession(item.window)), iconColor: bothTint(item.provider, item.window)))
                 output.markers += [(focus.position(item.graph.reset), 100), (focus.position(item.graph.start), 100)]
+            }
+            for id in ["codex", "claude"] {
+                if let expiry = entries.filter({ $0.provider == id }).compactMap({ planExpiry(id, graph: $0.graph, now: now) }).first {
+                    output.labels.append(expiryLabel(id, date: expiry, x: focus.position(expiry), now: now))
+                }
             }
             for item in entries {
                 guard let depletion = runoutForecast(item.graph)?.depletionDate else { continue }

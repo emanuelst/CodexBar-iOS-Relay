@@ -28,7 +28,7 @@ struct CloudCreditsChecks {
         precondition(cloudPayload.usage[0].usage!.details == entries[0].usage!.details)
         let devFixture = fixture.appendingPathExtension("dev")
         var devUsage = snapshotUsage
-        devUsage["identity"] = ["accountID": "claude-owner-v1:dev-account"]
+        devUsage["identity"] = ["providerID": "claude", "accountID": "claude-owner-v1:dev-account", "accountOrganization": "Example organization"]
         devUsage["accountEmail"] = "dev@example.com"
         devUsage["subscriptionRenewsAt"] = Date(timeIntervalSince1970: 1_800_000_000).timeIntervalSinceReferenceDate
         devUsage["primary"] = ["usedPercent": 73]
@@ -42,6 +42,8 @@ struct CloudCreditsChecks {
         precondition(devPayload.usage[0].source == "codexbar-dev")
         precondition(devPayload.usage[0].usage!.accountEmail == "dev@example.com")
         precondition(devPayload.usage[0].usage!.primary!.usedPercent == 73)
+        precondition(devPayload.usage[0].usage!.identity?.providerID == "claude")
+        precondition(devPayload.usage[0].usage!.identity?.accountOrganization == "Example organization")
         precondition(devPayload.usage[0].usage!.subscriptionRenewsAt != nil)
         devUsage["subscriptionRenewsAt"] = nil
         devUsage["subscriptionExpiresAt"] = Date(timeIntervalSince1970: 1_800_000_000).timeIntervalSinceReferenceDate

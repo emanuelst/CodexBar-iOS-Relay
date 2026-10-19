@@ -26,7 +26,17 @@ public struct UsageEntry: Codable, Hashable {
     }
 }
 
+/// Display-safe ownership fields already supplied by CodexBar's snapshots.
+public struct UsageIdentity: Codable, Hashable {
+    public let providerID: String?
+    public let accountEmail: String?
+    public let accountOrganization: String?
+    public let loginMethod: String?
+    public let accountID: String?
+}
+
 public struct Usage: Codable, Hashable {
+    public let identity: UsageIdentity?
     public let accountEmail: String?
     public let updatedAt: String?
     public let loginMethod: String?
@@ -43,7 +53,8 @@ public struct Usage: Codable, Hashable {
     public let subscriptionRenewsAtIsDateOnly: Bool?
     public let subscriptionExpiresAtIsDateOnly: Bool?
 
-    public init(accountEmail: String?, updatedAt: String?, loginMethod: String?, primary: Limit?, secondary: Limit?, tertiary: Limit?, extraRateWindows: [NamedLimit]? = nil, codexResetCredits: CodexResetCredits?, subscriptionRenewsAt: String? = nil, subscriptionExpiresAt: String? = nil, details: [UsageDetailSection]? = nil, subscriptionRenewsAtIsDateOnly: Bool? = nil, subscriptionExpiresAtIsDateOnly: Bool? = nil) {
+    public init(accountEmail: String?, updatedAt: String?, loginMethod: String?, primary: Limit?, secondary: Limit?, tertiary: Limit?, extraRateWindows: [NamedLimit]? = nil, codexResetCredits: CodexResetCredits?, subscriptionRenewsAt: String? = nil, subscriptionExpiresAt: String? = nil, details: [UsageDetailSection]? = nil, subscriptionRenewsAtIsDateOnly: Bool? = nil, subscriptionExpiresAtIsDateOnly: Bool? = nil, identity: UsageIdentity? = nil) {
+        self.identity = identity
         self.accountEmail = accountEmail
         self.updatedAt = updatedAt
         self.loginMethod = loginMethod
