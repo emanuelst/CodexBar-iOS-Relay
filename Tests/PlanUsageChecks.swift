@@ -13,6 +13,10 @@ import Foundation
         let g = graph([entry(1200, 10), entry(600, 20)])!
         precondition(g.samples.count == 2 && g.last.date == now.addingTimeInterval(-600))
         precondition(g.last.remaining == 80 && g.progress(g.start) == 0 && g.progress(g.reset) == 100)
+        precondition(PlanUsageGraph.matchesWindowDuration(300, 302))
+        precondition(PlanUsageGraph.matchesWindowDuration(43200, 43200))
+        precondition(!PlanUsageGraph.matchesWindowDuration(300, 43200), "old session history cannot stand in for a live monthly quota")
+        precondition(!PlanUsageGraph.matchesWindowDuration(10080, 300), "weekly and session history remain separate")
         let shortAxis = PlanUsageTimeAxis(start: now.addingTimeInterval(-5 * 3600), end: now)
         precondition(shortAxis.labelDates == shortAxis.hourBoundaries && shortAxis.labelDates.count > 5 && shortAxis.dayBoundaries.isEmpty)
         precondition(shortAxis.label(for: shortAxis.labelDates[0]).contains(":"))
@@ -82,6 +86,12 @@ import Foundation
         precondition(billing.subscriptionRenewalValue == "2026-11-05")
         let legacy = try JSONDecoder().decode(Usage.self, from: Data("{}".utf8))
         precondition(legacy.subscriptionRenewalValue == nil)
+        precondition(Limit(windowMinutes: 43200, resetsAt: nil, resetDescription: nil, usedPercent: 1)
+            .displayName(provider: "codex", fallback: "Session") == "Monthly")
+        precondition(Limit(windowMinutes: 10080, resetsAt: nil, resetDescription: nil, usedPercent: 1)
+            .displayName(provider: "claude", fallback: "Weekly") == "Weekly")
+        precondition(Limit(windowMinutes: nil, resetsAt: nil, resetDescription: nil, usedPercent: 1)
+            .displayName(provider: "codex", fallback: "Session") == "Session")
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("relay-history-check-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         func write(_ key: String, version: Int = 1) throws {

@@ -150,6 +150,16 @@ public struct Limit: Codable, Hashable {
     public let resetsAt: String?
     public let resetDescription: String?
     public let usedPercent: Double?
+
+    public func displayName(provider: String, fallback: String) -> String {
+        guard ["codex", "claude"].contains(provider.lowercased()), let windowMinutes else { return fallback }
+        switch windowMinutes {
+        case 295...305: return "Session"
+        case 10070...10090: return "Weekly"
+        case 43190...43210: return "Monthly"
+        default: return fallback
+        }
+    }
 }
 
 public struct ApiError: Codable, Hashable {

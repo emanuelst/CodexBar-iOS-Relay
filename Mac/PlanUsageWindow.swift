@@ -83,10 +83,14 @@ struct PlanUsageWindow: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
+                    Text("Provider").fixedSize()
                     Picker("Provider", selection: $provider) {
                         ForEach(["Codex", "Claude", "Combined"], id: \.self) { Text($0).tag($0) }
                     }.pickerStyle(.segmented)
-                    Toggle("Always on top", isOn: $floating).toggleStyle(.checkbox)
+                        .labelsHidden()
+                        .accessibilityLabel("Provider")
+                        .layoutPriority(1)
+                    Toggle("Always on top", isOn: $floating).toggleStyle(.checkbox).fixedSize()
                 }
                 Picker("Quota window", selection: $lane) {
                     ForEach(lanes, id: \.self) { Text(laneTitle($0)).tag($0) }
@@ -155,7 +159,18 @@ struct PlanUsageWindow: View {
     }
     private func graph(_ id: String, in window: String? = nil, now: Date) -> PlanUsageGraph? {
         guard let series = histories[id]?.first(where: { $0.name == (window ?? lane) }) else { return nil }
+        // History can outlive a provider plan change. Do not present an old session/week
+        // as current when the live Relay snapshot now reports a different quota window.
+        if let liveMinutes = currentQuotaWindowMinutes(provider: id),
+           !liveMinutes.contains(where: { PlanUsageGraph.matchesWindowDuration(series.windowMinutes, $0) }) { return nil }
         return PlanUsageGraph(series: series, now: now)
+    }
+
+    private func currentQuotaWindowMinutes(provider: String) -> [Int]? {
+        guard let usage = payload?.usage.first(where: { $0.provider == provider })?.usage else { return nil }
+        let minutes = [usage.primary?.windowMinutes, usage.secondary?.windowMinutes, usage.tertiary?.windowMinutes]
+            .compactMap { $0 }
+        return minutes.isEmpty ? nil : minutes
     }
     /// The window before `current` (session or weekly), shown faintly while the current one is in
     /// its first half so a fresh or early reset still has recorded context. Display only.

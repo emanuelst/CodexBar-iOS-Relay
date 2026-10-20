@@ -217,6 +217,21 @@ struct PlanUsageGraph: Equatable {
     let samples: [Sample]
     var last: Sample { samples[samples.count - 1] }
 
+    static func matchesWindowDuration(_ historyMinutes: Int, _ currentMinutes: Int) -> Bool {
+        func lane(_ minutes: Int) -> String? {
+            switch minutes {
+            case 295...305: return "session"
+            case 10070...10090: return "weekly"
+            case 43190...43210: return "monthly"
+            default: return nil
+            }
+        }
+        if let historyLane = lane(historyMinutes), let currentLane = lane(currentMinutes) {
+            return historyLane == currentLane
+        }
+        return historyMinutes == currentMinutes
+    }
+
     init?(series: PlanUsageSeries, now: Date) {
         let entries = Self.sorted(series.entries)
         guard series.windowMinutes > 0, let latest = entries.last,

@@ -20,8 +20,8 @@ public struct ProviderRow: View {
             header
             if let usage = entry.usage {
                 if hasVisibleLimits(usage) {
-                    if let p = usage.primary { limitView(isSessionWeeklyProvider ? "Session" : "Primary", p); paceLine(for: p) }
-                    if let s = usage.secondary { limitView(isSessionWeeklyProvider ? "Weekly" : "Secondary", s); paceLine(for: s) }
+                    if let p = usage.primary { limitView(p.displayName(provider: entry.provider, fallback: isSessionWeeklyProvider ? "Session" : "Primary"), p); paceLine(for: p) }
+                    if let s = usage.secondary { limitView(s.displayName(provider: entry.provider, fallback: isSessionWeeklyProvider ? "Weekly" : "Secondary"), s); paceLine(for: s) }
                     if let t = usage.tertiary { limitView("Tertiary", t); paceLine(for: t) }
                     gptReserveView(usage.extraRateWindows)
                 } else {
@@ -94,11 +94,12 @@ public struct ProviderRow: View {
         // showUsed=true  -> used: bar fills as you use, high used = red.
         let used = limit.usedPercent ?? 0
         let displayed = showUsed ? used : max(0, 100 - used)
+        let wholeNumberIfIntegral = ["Primary", "Secondary", "Session", "Weekly", "Monthly"].contains(label)
         return VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Text(label).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Text(percentageText(displayed, wholeNumberIfIntegral: label == "Primary" || label == "Secondary" || label == "Session" || label == "Weekly"))
+                Text(percentageText(displayed, wholeNumberIfIntegral: wholeNumberIfIntegral))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(percentColor(displayed, showUsed: showUsed))
             }
@@ -106,7 +107,7 @@ public struct ProviderRow: View {
                 #if os(macOS)
                 .progressViewStyle(QuotaProgressStyle(color: percentColor(displayed, showUsed: showUsed)))
                 .accessibilityLabel(Text("\(label) \(showUsed ? "used" : "remaining")"))
-                .accessibilityValue(Text(percentageText(displayed, wholeNumberIfIntegral: label == "Primary" || label == "Secondary" || label == "Session" || label == "Weekly")))
+                .accessibilityValue(Text(percentageText(displayed, wholeNumberIfIntegral: wholeNumberIfIntegral)))
                 #else
                 .tint(percentColor(displayed, showUsed: showUsed))
                 .scaleEffect(y: 1.1)
