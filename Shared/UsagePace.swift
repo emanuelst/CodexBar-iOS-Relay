@@ -122,6 +122,19 @@ public enum UsagePaceText {
         return left
     }
 
+    /// Five-hour quota windows remaining before a weekly Codex/Claude reset.
+    /// This is a time-derived count, not a prediction of how many sessions the
+    /// remaining weekly allowance can fund (that requires historical burn data).
+    public static func weeklyWindowsUntilReset(for limit: Limit, now: Date = .init()) -> Int? {
+        guard let minutes = limit.windowMinutes,
+              (10070...10090).contains(minutes),
+              let resetsAt = limit.resetsAt,
+              let reset = ResetCountdown.date(from: resetsAt) else { return nil }
+        let remaining = reset.timeIntervalSince(now)
+        guard remaining > 0 else { return nil }
+        return Int(floor(remaining / (5 * 60 * 60)))
+    }
+
     /// Shared by the summary and chart projection so both use the same eligibility rules and math.
     public static func visiblePace(
         usedPercent: Double,

@@ -355,6 +355,69 @@ struct PlanUsageHistoryReader {
     }
 }
 
+/// Estimates how many current weekly allowances remain in session-sized chunks.
+/// Requires several completed session windows aligned with weekly-history captures;
+/// returns nil rather than guessing when the local history cannot support it.
+enum SessionQuotaForecast {
+    private struct SessionGroup {
+        let reset: Date
+        var entries: [PlanUsageEntry]
+    }
+
+    static func remainingSessionQuotas(
+        provider: String,
+        weeklyUsedPercent: Double,
+        weeklyReset: Date,
+        now: Date,
+        history: [PlanUsageSeries]) -> Double? {
+        guard ["codex", "claude"].contains(provider.lowercased()),
+              weeklyUsedPercent.isFinite, (0...100).contains(weeklyUsedPercent),
+              weeklyReset > now,
+              let sessions = history.first(where: { $0.name == "session" && (295...305).contains($0.windowMinutes) }),
+              let weekly = history.first(where: { $0.name == "weekly" && (10070...10090).contains($0.windowMinutes) }) else { return nil }
+
+        let tolerance: TimeInterval = 2 * 60
+        var groups: [SessionGroup] = []
+        for entry in sessions.entries.sorted(by: { $0.capturedAt < $1.capturedAt }) {
+            guard let reset = entry.resetsAt, entry.usedPercent.isFinite,
+                  (0...100).contains(entry.usedPercent),
+                  reset.timeIntervalSince(entry.capturedAt) >= -tolerance,
+                  reset.timeIntervalSince(entry.capturedAt) <= 5 * 60 * 60 + tolerance else { continue }
+            if let last = groups.indices.last, abs(groups[last].reset.timeIntervalSince(reset)) <= tolerance {
+                groups[last].entries.append(entry)
+            } else {
+                groups.append(SessionGroup(reset: reset, entries: [entry]))
+            }
+        }
+
+        let weeklyEntries = weekly.entries.sorted(by: { $0.capturedAt < $1.capturedAt })
+        func nearestWeeklyEntry(to date: Date) -> PlanUsageEntry? {
+            weeklyEntries
+                .filter { abs($0.capturedAt.timeIntervalSince(date)) <= tolerance }
+                .min { abs($0.capturedAt.timeIntervalSince(date)) < abs($1.capturedAt.timeIntervalSince(date)) }
+        }
+
+        var burns: [Double] = []
+        for group in groups where group.reset <= now && group.reset < weeklyReset {
+            guard let first = group.entries.first, let last = group.entries.last,
+                  last.usedPercent > first.usedPercent,
+                  let weeklyStart = nearestWeeklyEntry(to: first.capturedAt),
+                  let weeklyEnd = nearestWeeklyEntry(to: last.capturedAt),
+                  let startReset = weeklyStart.resetsAt, let endReset = weeklyEnd.resetsAt,
+                  abs(startReset.timeIntervalSince(endReset)) <= tolerance,
+                  weeklyEnd.usedPercent > weeklyStart.usedPercent else { continue }
+            let burn = 100 * (weeklyEnd.usedPercent - weeklyStart.usedPercent) / (last.usedPercent - first.usedPercent)
+            if burn.isFinite, burn > 0 { burns.append(burn) }
+        }
+        guard burns.count >= 3 else { return nil }
+        burns.sort()
+        let middle = burns.count / 2
+        let median = burns.count.isMultiple(of: 2) ? (burns[middle - 1] + burns[middle]) / 2 : burns[middle]
+        guard median.isFinite, median > 0 else { return nil }
+        return max(0, 100 - weeklyUsedPercent) / median
+    }
+}
+
 /// Deterministic, collision-aware placement for in-chart labels.
 /// Lane labels (Now, resets, run-outs) live in reserved bands above and below the data;
 /// floating labels (provider tags) try a fixed list of offsets around their point.

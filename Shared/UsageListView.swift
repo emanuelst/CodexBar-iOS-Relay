@@ -6,6 +6,9 @@ public struct ProviderRow: View {
     public let showAbsolute: Bool
     public let hidePersonalInfo: Bool
     public let now: Date
+    #if os(macOS)
+    @State private var sessionQuotaEstimate: Double?
+    #endif
 
     public init(entry: UsageEntry, showUsed: Bool = false, showAbsolute: Bool = false, hidePersonalInfo: Bool = false, now: Date = .now) {
         self.entry = entry
@@ -41,6 +44,31 @@ public struct ProviderRow: View {
             }
         }
         .padding(.vertical, 6)
+        #if os(macOS)
+        .task(id: entry.usage?.updatedAt ?? "") {
+            guard isSessionWeeklyProvider,
+                  let usage = entry.usage,
+                  let weekly = [usage.primary, usage.secondary, usage.tertiary]
+                    .compactMap({ $0 })
+                    .first(where: { $0.windowMinutes.map { (10070...10090).contains($0) } == true }),
+                  let weeklyUsed = weekly.usedPercent,
+                  let weeklyReset = weekly.resetsAt.flatMap(ResetCountdown.date(from:)) else {
+                sessionQuotaEstimate = nil
+                return
+            }
+            let provider = entry.provider
+            let observedAt = self.now
+            sessionQuotaEstimate = await Task.detached(priority: .utility) {
+                let history = PlanUsageHistoryReader().read(provider: provider)
+                return SessionQuotaForecast.remainingSessionQuotas(
+                    provider: provider,
+                    weeklyUsedPercent: weeklyUsed,
+                    weeklyReset: weeklyReset,
+                    now: observedAt,
+                    history: history)
+            }.value
+        }
+        #endif
     }
 
     private var header: some View {
@@ -146,10 +174,23 @@ public struct ProviderRow: View {
 
     @ViewBuilder
     private func paceLine(for limit: Limit) -> some View {
-        if let pace = UsagePaceText.summary(for: limit, now: now) {
-            Text(pace)
+        let pace = UsagePaceText.summary(for: limit, now: now)
+        let weeklyWindows = isSessionWeeklyProvider
+            ? UsagePaceText.weeklyWindowsUntilReset(for: limit, now: now)
+            : nil
+        let isWeekly = limit.windowMinutes.map { (10070...10090).contains($0) } == true
+        let estimate = isWeekly ? sessionQuotaEstimate.map { value in
+            let amount = value.formatted(.number.precision(.fractionLength(0...1)))
+            let unit = value <= 1 ? "session quota" : "session quotas"
+            return "Est. \(amount) \(unit) left"
+        } : nil
+        let detail = [pace, estimate, weeklyWindows.map { "\($0) windows until reset" }]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+        if !detail.isEmpty {
+            Text(detail)
                 .font(.caption2)
-                .foregroundStyle(paceColor(pace))
+                .foregroundStyle(pace.map(paceColor) ?? .secondary)
                 .padding(.top, 1)
         }
     }

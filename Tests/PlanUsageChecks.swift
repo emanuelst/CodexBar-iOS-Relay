@@ -92,6 +92,42 @@ import Foundation
             .displayName(provider: "claude", fallback: "Weekly") == "Weekly")
         precondition(Limit(windowMinutes: nil, resetsAt: nil, resetDescription: nil, usedPercent: 1)
             .displayName(provider: "codex", fallback: "Session") == "Session")
+        let weeklyReset = ISO8601DateFormatter().string(from: now.addingTimeInterval(80 * 60 * 60))
+        precondition(UsagePaceText.weeklyWindowsUntilReset(
+            for: Limit(windowMinutes: 10080, resetsAt: weeklyReset, resetDescription: nil, usedPercent: 20),
+            now: now) == 16)
+        precondition(UsagePaceText.weeklyWindowsUntilReset(
+            for: Limit(windowMinutes: 300, resetsAt: weeklyReset, resetDescription: nil, usedPercent: 20),
+            now: now) == nil)
+        precondition(UsagePaceText.weeklyWindowsUntilReset(
+            for: Limit(windowMinutes: 10080, resetsAt: nil, resetDescription: nil, usedPercent: 20),
+            now: now) == nil)
+        let historyWeeklyReset = now.addingTimeInterval(24 * 60 * 60)
+        var sessionEntries: [PlanUsageEntry] = []
+        var weeklyEntries: [PlanUsageEntry] = []
+        for index in 0..<3 {
+            let firstCapture = now.addingTimeInterval(Double(-30 + index * 6) * 60 * 60)
+            let lastCapture = firstCapture.addingTimeInterval(30 * 60)
+            let resetAt = firstCapture.addingTimeInterval(5 * 60 * 60)
+            sessionEntries += [
+                PlanUsageEntry(capturedAt: firstCapture, usedPercent: 0, resetsAt: resetAt),
+                PlanUsageEntry(capturedAt: lastCapture, usedPercent: 50, resetsAt: resetAt),
+            ]
+            weeklyEntries += [
+                PlanUsageEntry(capturedAt: firstCapture, usedPercent: Double(index * 10), resetsAt: historyWeeklyReset),
+                PlanUsageEntry(capturedAt: lastCapture, usedPercent: Double((index + 1) * 10), resetsAt: historyWeeklyReset),
+            ]
+        }
+        let quotaEstimate = SessionQuotaForecast.remainingSessionQuotas(
+            provider: "claude",
+            weeklyUsedPercent: 40,
+            weeklyReset: historyWeeklyReset,
+            now: now,
+            history: [
+                PlanUsageSeries(name: "session", windowMinutes: 300, entries: sessionEntries),
+                PlanUsageSeries(name: "weekly", windowMinutes: 10080, entries: weeklyEntries),
+            ])
+        precondition(quotaEstimate == 3, "historical session burn should estimate remaining session-quota equivalents")
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("relay-history-check-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         func write(_ key: String, version: Int = 1) throws {
