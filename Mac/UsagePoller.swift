@@ -192,15 +192,18 @@ final class UsagePoller: ObservableObject {
         entries.map { entry in
             guard ["codex", "claude"].contains(entry.provider),
                   let usage = entry.usage,
+                  let session = [usage.primary, usage.secondary, usage.tertiary]
+                    .compactMap({ $0 })
+                    .first(where: { $0.windowMinutes.map { (295...305).contains($0) } == true }),
                   let weekly = [usage.primary, usage.secondary, usage.tertiary]
                     .compactMap({ $0 })
                     .first(where: { $0.windowMinutes.map { (10070...10090).contains($0) } == true }),
-                  let weeklyUsed = weekly.usedPercent,
-                  let weeklyReset = weekly.resetsAt.flatMap(ResetCountdown.date(from:)) else { return entry }
+                  weekly.usedPercent != nil,
+                  weekly.resetsAt.flatMap(ResetCountdown.date(from:)) != nil else { return entry }
             let history = PlanUsageHistoryReader().read(provider: entry.provider)
             let estimate = SessionQuotaForecast.remainingSessionQuotas(
-                provider: entry.provider, weeklyUsedPercent: weeklyUsed,
-                weeklyReset: weeklyReset, now: now, history: history)
+                provider: entry.provider, session: session, weekly: weekly,
+                now: now, history: history)
             return UsageEntry(provider: entry.provider, source: entry.source, account: entry.account,
                               usage: usage, error: entry.error,
                               estimatedSessionQuotasLeft: estimate)

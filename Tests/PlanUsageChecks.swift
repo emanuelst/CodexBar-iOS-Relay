@@ -120,14 +120,43 @@ import Foundation
         }
         let quotaEstimate = SessionQuotaForecast.remainingSessionQuotas(
             provider: "claude",
-            weeklyUsedPercent: 40,
-            weeklyReset: historyWeeklyReset,
+            session: Limit(windowMinutes: 300, resetsAt: ISO8601DateFormatter().string(from: now.addingTimeInterval(3600)), resetDescription: nil, usedPercent: 20),
+            weekly: Limit(windowMinutes: 10080, resetsAt: ISO8601DateFormatter().string(from: historyWeeklyReset), resetDescription: nil, usedPercent: 40),
             now: now,
             history: [
                 PlanUsageSeries(name: "session", windowMinutes: 300, entries: sessionEntries),
                 PlanUsageSeries(name: "weekly", windowMinutes: 10080, entries: weeklyEntries),
             ])
         precondition(quotaEstimate == 3, "historical session burn should estimate remaining session-quota equivalents")
+        var paritySessions: [PlanUsageEntry] = []
+        var parityWeekly: [PlanUsageEntry] = []
+        let sessionBurns: [Double] = [5, 4, 8, 6, 10, 12, 14, 16]
+        var cumulativeWeekly = 1.0
+        for (index, burn) in sessionBurns.enumerated() {
+            let resetAt = now.addingTimeInterval(Double(index - 7) * 5 * 60 * 60)
+            let firstCapture = resetAt.addingTimeInterval(-4 * 60 * 60)
+            let lastCapture = resetAt.addingTimeInterval(-60)
+            let weeklyEnd = cumulativeWeekly + burn / 2
+            paritySessions += [
+                PlanUsageEntry(capturedAt: firstCapture, usedPercent: 0, resetsAt: resetAt),
+                PlanUsageEntry(capturedAt: lastCapture, usedPercent: 50, resetsAt: resetAt),
+            ]
+            parityWeekly += [
+                PlanUsageEntry(capturedAt: firstCapture, usedPercent: cumulativeWeekly, resetsAt: historyWeeklyReset),
+                PlanUsageEntry(capturedAt: lastCapture, usedPercent: weeklyEnd, resetsAt: historyWeeklyReset),
+            ]
+            cumulativeWeekly = weeklyEnd
+        }
+        let latestSevenEstimate = SessionQuotaForecast.remainingSessionQuotas(
+            provider: "claude",
+            session: Limit(windowMinutes: 300, resetsAt: ISO8601DateFormatter().string(from: now.addingTimeInterval(3600)), resetDescription: nil, usedPercent: 20),
+            weekly: Limit(windowMinutes: 10080, resetsAt: ISO8601DateFormatter().string(from: historyWeeklyReset), resetDescription: nil, usedPercent: 60),
+            now: now,
+            history: [
+                PlanUsageSeries(name: "session", windowMinutes: 300, entries: paritySessions),
+                PlanUsageSeries(name: "weekly", windowMinutes: 10080, entries: parityWeekly),
+            ])
+        precondition(latestSevenEstimate == 4, "forecast must match CodexBar's median of the latest seven completed session burns")
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("relay-history-check-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         func write(_ key: String, version: Int = 1) throws {

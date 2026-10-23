@@ -362,59 +362,146 @@ enum SessionQuotaForecast {
     private struct SessionGroup {
         let reset: Date
         var entries: [PlanUsageEntry]
+        var maximumUsedPercent: Double
     }
+
+    private struct BurnObservation {
+        let sessionUsedPercent: Double
+        let weeklyEntry: PlanUsageEntry
+    }
+
+    private static let sessionDuration: TimeInterval = 300 * 60
+    private static let weeklyDuration: TimeInterval = 10080 * 60
+    private static let resetTolerance: TimeInterval = 2 * 60
+    private static let sampleLimit = 7
+    private static let minimumSampleCount = 3
 
     static func remainingSessionQuotas(
         provider: String,
-        weeklyUsedPercent: Double,
-        weeklyReset: Date,
+        session: Limit,
+        weekly: Limit,
         now: Date,
         history: [PlanUsageSeries]) -> Double? {
         guard ["codex", "claude"].contains(provider.lowercased()),
+              session.windowMinutes.map({ (295...305).contains($0) }) == true,
+              weekly.windowMinutes.map({ (10070...10090).contains($0) }) == true,
+              let weeklyUsedPercent = weekly.usedPercent,
               weeklyUsedPercent.isFinite, (0...100).contains(weeklyUsedPercent),
+              let weeklyReset = weekly.resetsAt.flatMap(ResetCountdown.date(from:)),
               weeklyReset > now,
+              weeklyReset.timeIntervalSince(now) <= weeklyDuration + resetTolerance,
               let sessions = history.first(where: { $0.name == "session" && (295...305).contains($0.windowMinutes) }),
-              let weekly = history.first(where: { $0.name == "weekly" && (10070...10090).contains($0.windowMinutes) }) else { return nil }
+              let weeklyHistory = history.first(where: { $0.name == "weekly" && (10070...10090).contains($0.windowMinutes) }) else { return nil }
 
-        let tolerance: TimeInterval = 2 * 60
+        let currentSessionResetsAt = session.resetsAt.flatMap(ResetCountdown.date(from:))
+        if let currentSessionResetsAt {
+            let remaining = currentSessionResetsAt.timeIntervalSince(now)
+            guard remaining.isFinite, remaining > 0, remaining <= sessionDuration + resetTolerance else { return nil }
+        }
+
+        let sessionEntries = sortedHistoryEntries(sessions.entries)
+        let weeklyEntries = sortedHistoryEntries(weeklyHistory.entries).filter { entry in
+            entry.usedPercent.isFinite && (0...100).contains(entry.usedPercent)
+                && entry.resetsAt.map { isPlausibleReset($0, capturedAt: entry.capturedAt, duration: weeklyDuration) } == true
+        }
+        guard !weeklyEntries.isEmpty else { return nil }
+
         var groups: [SessionGroup] = []
-        for entry in sessions.entries.sorted(by: { $0.capturedAt < $1.capturedAt }) {
-            guard let reset = entry.resetsAt, entry.usedPercent.isFinite,
-                  (0...100).contains(entry.usedPercent),
-                  reset.timeIntervalSince(entry.capturedAt) >= -tolerance,
-                  reset.timeIntervalSince(entry.capturedAt) <= 5 * 60 * 60 + tolerance else { continue }
-            if let last = groups.indices.last, abs(groups[last].reset.timeIntervalSince(reset)) <= tolerance {
+        for entry in sessionEntries {
+            guard entry.usedPercent.isFinite, (0...100).contains(entry.usedPercent),
+                  let reset = entry.resetsAt,
+                  isPlausibleReset(reset, capturedAt: entry.capturedAt, duration: sessionDuration) else { continue }
+            if let last = groups.indices.last, abs(groups[last].reset.timeIntervalSince(reset)) <= resetTolerance {
                 groups[last].entries.append(entry)
+                groups[last].maximumUsedPercent = max(groups[last].maximumUsedPercent, entry.usedPercent)
             } else {
-                groups.append(SessionGroup(reset: reset, entries: [entry]))
+                guard groups.last.map({ $0.reset <= reset }) ?? true else { return nil }
+                groups.append(SessionGroup(reset: reset, entries: [entry], maximumUsedPercent: entry.usedPercent))
             }
         }
 
-        let weeklyEntries = weekly.entries.sorted(by: { $0.capturedAt < $1.capturedAt })
-        func nearestWeeklyEntry(to date: Date) -> PlanUsageEntry? {
-            weeklyEntries
-                .filter { abs($0.capturedAt.timeIntervalSince(date)) <= tolerance }
-                .min { abs($0.capturedAt.timeIntervalSince(date)) < abs($1.capturedAt.timeIntervalSince(date)) }
-        }
-
         var burns: [Double] = []
-        for group in groups where group.reset <= now && group.reset < weeklyReset {
-            guard let first = group.entries.first, let last = group.entries.last,
-                  last.usedPercent > first.usedPercent,
-                  let weeklyStart = nearestWeeklyEntry(to: first.capturedAt),
-                  let weeklyEnd = nearestWeeklyEntry(to: last.capturedAt),
-                  let startReset = weeklyStart.resetsAt, let endReset = weeklyEnd.resetsAt,
-                  abs(startReset.timeIntervalSince(endReset)) <= tolerance,
-                  weeklyEnd.usedPercent > weeklyStart.usedPercent else { continue }
-            let burn = 100 * (weeklyEnd.usedPercent - weeklyStart.usedPercent) / (last.usedPercent - first.usedPercent)
-            if burn.isFinite, burn > 0 { burns.append(burn) }
+        let candidateGroups = groups.reversed().filter { group in
+            let precedesCurrent = currentSessionResetsAt.map { group.reset < $0.addingTimeInterval(-resetTolerance) } ?? true
+            return precedesCurrent && group.reset <= now && group.maximumUsedPercent > 0
+        }.prefix(sampleLimit)
+        for group in candidateGroups {
+            if let burn = normalizedBurn(for: group, weeklyEntries: weeklyEntries) { burns.append(burn) }
         }
-        guard burns.count >= 3 else { return nil }
+        guard burns.count >= minimumSampleCount else { return nil }
         burns.sort()
         let middle = burns.count / 2
         let median = burns.count.isMultiple(of: 2) ? (burns[middle - 1] + burns[middle]) / 2 : burns[middle]
         guard median.isFinite, median > 0 else { return nil }
-        return max(0, 100 - weeklyUsedPercent) / median
+        let remainingWeeklyPercent = max(0, min(100, 100 - weeklyUsedPercent))
+        guard remainingWeeklyPercent > 0 else { return nil }
+        return remainingWeeklyPercent / median
+    }
+
+    private static func normalizedBurn(for group: SessionGroup, weeklyEntries: [PlanUsageEntry]) -> Double? {
+        guard let firstSessionEntry = group.entries.first, let lastSessionEntry = group.entries.last else { return nil }
+        var observations: [BurnObservation] = []
+        let windowStart = group.reset.addingTimeInterval(-sessionDuration)
+        if let weeklyStart = nearestEntry(to: windowStart, entries: weeklyEntries,
+                                          tolerance: resetTolerance, requireNotAfterTarget: true),
+           weeklyStart.capturedAt <= windowStart, weeklyStart.capturedAt < firstSessionEntry.capturedAt {
+            observations.append(BurnObservation(sessionUsedPercent: 0, weeklyEntry: weeklyStart))
+        }
+        for sessionEntry in group.entries {
+            guard let weeklyEntry = nearestEntry(to: sessionEntry.capturedAt, entries: weeklyEntries, tolerance: 0) else { continue }
+            observations.append(BurnObservation(sessionUsedPercent: sessionEntry.usedPercent, weeklyEntry: weeklyEntry))
+        }
+        if group.maximumUsedPercent >= 100,
+           let weeklyEnd = nearestEntry(to: group.reset, entries: weeklyEntries,
+                                        tolerance: resetTolerance, requireNotAfterTarget: true),
+           weeklyEnd.capturedAt <= group.reset, lastSessionEntry.capturedAt < weeklyEnd.capturedAt {
+            observations.append(BurnObservation(sessionUsedPercent: 100, weeklyEntry: weeklyEnd))
+        }
+        observations.sort {
+            if $0.weeklyEntry.capturedAt != $1.weeklyEntry.capturedAt {
+                return $0.weeklyEntry.capturedAt < $1.weeklyEntry.capturedAt
+            }
+            return $0.sessionUsedPercent < $1.sessionUsedPercent
+        }
+        guard let start = observations.first, let end = observations.last,
+              start.weeklyEntry.capturedAt < end.weeklyEntry.capturedAt,
+              let startReset = start.weeklyEntry.resetsAt, let endReset = end.weeklyEntry.resetsAt,
+              abs(startReset.timeIntervalSince(endReset)) <= resetTolerance else { return nil }
+        let sessionConsumption = end.sessionUsedPercent - start.sessionUsedPercent
+        let weeklyBurn = end.weeklyEntry.usedPercent - start.weeklyEntry.usedPercent
+        guard sessionConsumption.isFinite, sessionConsumption > 0, weeklyBurn.isFinite, weeklyBurn > 0 else { return nil }
+        let burn = 100 * weeklyBurn / sessionConsumption
+        return burn.isFinite && burn > 0 ? burn : nil
+    }
+
+    private static func nearestEntry(to target: Date, entries: [PlanUsageEntry], tolerance: TimeInterval,
+                                     requireNotAfterTarget: Bool = false) -> PlanUsageEntry? {
+        var lower = 0
+        var upper = entries.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if entries[middle].capturedAt < target { lower = middle + 1 } else { upper = middle }
+        }
+        var candidates: [PlanUsageEntry] = []
+        if lower < entries.count { candidates.append(entries[lower]) }
+        if lower > 0 { candidates.append(entries[lower - 1]) }
+        return candidates
+            .filter { !requireNotAfterTarget || $0.capturedAt <= target }
+            .filter { abs($0.capturedAt.timeIntervalSince(target)) <= tolerance }
+            .min { abs($0.capturedAt.timeIntervalSince(target)) < abs($1.capturedAt.timeIntervalSince(target)) }
+    }
+
+    private static func isPlausibleReset(_ reset: Date, capturedAt: Date, duration: TimeInterval) -> Bool {
+        let remaining = reset.timeIntervalSince(capturedAt)
+        return remaining.isFinite && remaining >= -resetTolerance && remaining <= duration + resetTolerance
+    }
+
+    private static func sortedHistoryEntries(_ entries: [PlanUsageEntry]) -> [PlanUsageEntry] {
+        entries.sorted {
+            if $0.capturedAt != $1.capturedAt { return $0.capturedAt < $1.capturedAt }
+            if $0.usedPercent != $1.usedPercent { return $0.usedPercent < $1.usedPercent }
+            return ($0.resetsAt ?? .distantPast) < ($1.resetsAt ?? .distantPast)
+        }
     }
 }
 
