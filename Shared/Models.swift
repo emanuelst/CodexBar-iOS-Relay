@@ -9,13 +9,16 @@ public struct UsageEntry: Codable, Hashable {
     public let account: String?
     public let usage: Usage?
     public let error: ApiError?
+    /// Mac-computed estimate copied into Relay sync payloads for iOS display.
+    public let estimatedSessionQuotasLeft: Double?
 
-    public init(provider: String, source: String?, account: String?, usage: Usage?, error: ApiError?) {
+    public init(provider: String, source: String?, account: String?, usage: Usage?, error: ApiError?, estimatedSessionQuotasLeft: Double? = nil) {
         self.provider = provider
         self.source = source
         self.account = account
         self.usage = usage
         self.error = error
+        self.estimatedSessionQuotasLeft = estimatedSessionQuotasLeft
     }
 
     public var hasUsage: Bool { usage != nil }

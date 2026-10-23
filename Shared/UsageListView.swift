@@ -180,14 +180,16 @@ public struct ProviderRow: View {
             : nil
         #if os(macOS)
         let isWeekly = limit.windowMinutes.map { (10070...10090).contains($0) } == true
-        let estimate = isWeekly ? sessionQuotaEstimate.map { value in
+        let estimateValue = sessionQuotaEstimate ?? entry.estimatedSessionQuotasLeft
+        #else
+        let isWeekly = limit.windowMinutes.map { (10070...10090).contains($0) } == true
+        let estimateValue = entry.estimatedSessionQuotasLeft
+        #endif
+        let estimate = isWeekly ? estimateValue.map { value in
             let amount = value.formatted(.number.precision(.fractionLength(0...1)))
             let unit = value <= 1 ? "session quota" : "session quotas"
             return "Est. \(amount) \(unit) left"
         } : nil
-        #else
-        let estimate: String? = nil
-        #endif
         let detail = [pace, estimate, weeklyWindows.map { "\($0) windows until reset" }]
             .compactMap { $0 }
             .joined(separator: " · ")

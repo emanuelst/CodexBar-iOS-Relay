@@ -88,7 +88,7 @@ final class UsagePoller: ObservableObject {
     @discardableResult
     private func applyCachedPayload() -> Bool {
         guard let cloudPayload = cloudSyncReader.readPayload() else { return false }
-        let payload = payloadWithCachedCodexMetadata(cloudPayload)
+        let payload = payloadWithSessionQuotaForecasts(payloadWithCachedCodexMetadata(cloudPayload), now: .now)
         if self.payload != payload || lastError != nil {
             self.payload = payload
             syncedAt = ResetCountdown.date(from: payload.syncedAt)
@@ -145,7 +145,7 @@ final class UsagePoller: ObservableObject {
                 hostname: Host.current().localizedName ?? "Mac",
                 showUsed: Self.codexbarShowUsed,
                 resetTimesShowAbsolute: Self.codexbarResetAbsolute,
-                usage: entries
+                usage: entriesWithSessionQuotaForecasts(entries, now: .now)
             )
             self.payload = p
             self.syncedAt = Date()
@@ -178,6 +178,33 @@ final class UsagePoller: ObservableObject {
             showUsed: payload.showUsed,
             resetTimesShowAbsolute: payload.resetTimesShowAbsolute,
             usage: usage)
+    }
+
+    /// Compute history-backed estimates on the Mac before writing the shared payload.
+    /// iOS has no access to CodexBar's local history database, so it only renders this value.
+    private func payloadWithSessionQuotaForecasts(_ payload: Payload, now: Date) -> Payload {
+        Payload(syncedAt: payload.syncedAt, hostname: payload.hostname,
+                showUsed: payload.showUsed, resetTimesShowAbsolute: payload.resetTimesShowAbsolute,
+                usage: entriesWithSessionQuotaForecasts(payload.usage, now: now))
+    }
+
+    private func entriesWithSessionQuotaForecasts(_ entries: [UsageEntry], now: Date) -> [UsageEntry] {
+        entries.map { entry in
+            guard ["codex", "claude"].contains(entry.provider),
+                  let usage = entry.usage,
+                  let weekly = [usage.primary, usage.secondary, usage.tertiary]
+                    .compactMap({ $0 })
+                    .first(where: { $0.windowMinutes.map { (10070...10090).contains($0) } == true }),
+                  let weeklyUsed = weekly.usedPercent,
+                  let weeklyReset = weekly.resetsAt.flatMap(ResetCountdown.date(from:)) else { return entry }
+            let history = PlanUsageHistoryReader().read(provider: entry.provider)
+            let estimate = SessionQuotaForecast.remainingSessionQuotas(
+                provider: entry.provider, weeklyUsedPercent: weeklyUsed,
+                weeklyReset: weeklyReset, now: now, history: history)
+            return UsageEntry(provider: entry.provider, source: entry.source, account: entry.account,
+                              usage: usage, error: entry.error,
+                              estimatedSessionQuotasLeft: estimate)
+        }
     }
 
     /// Pre-encoded JSON the server hands out per request (avoids re-encoding on every hit).
@@ -281,7 +308,8 @@ final class UsagePoller: ObservableObject {
             source: cliCodex.source,
             account: cliCodex.account,
             usage: mergedUsage,
-            error: cliCodex.error
+            error: cliCodex.error,
+            estimatedSessionQuotasLeft: cliCodex.estimatedSessionQuotasLeft
         )
     }
 
@@ -325,12 +353,13 @@ final class UsagePoller: ObservableObject {
             return codexEntryWithMetadata(from: entry, fallback: nil, webMetadata: metadata)
         }
         guard usage != payload.usage else { return }
-        self.payload = Payload(
+        let updatedPayload = Payload(
             syncedAt: payload.syncedAt,
             hostname: payload.hostname,
             showUsed: payload.showUsed,
             resetTimesShowAbsolute: payload.resetTimesShowAbsolute,
             usage: usage)
+        self.payload = payloadWithSessionQuotaForecasts(updatedPayload, now: .now)
         self.onUpdate?()
     }
 
